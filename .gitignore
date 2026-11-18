@@ -1,0 +1,6 @@
+backups/
+node_modules/
+
+# Uploaded documents stay on each computer. They are real municipal records and
+# far too large for GitHub. Copy them between computers with Backup & Restore.
+uploads/

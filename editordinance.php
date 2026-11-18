@@ -16,20 +16,21 @@ if(isset($_POST['save'])){
     $spResoNo = mysqli_real_escape_string($conn, $_POST['spResoNo']);
     $dateApproved = mysqli_real_escape_string($conn, $_POST['dateApproved']);
 
-    // Handle file uploads
-    $attachment = $_FILES['attachment']['name'];
-
-    $uploadDir = "uploads/";  // Define upload directory
-    if (!empty($attachment)) {
-        $attachmentPath = $uploadDir . basename($attachment);
-        move_uploaded_file($_FILES["attachment"]["tmp_name"], $attachmentPath);
-    } else {
-        // Keep the old file if no new file is uploaded
+    // Handle file uploads. If the new file cannot be saved, the old attachment is kept.
+    require_once __DIR__ . "/includes/upload_helper.php";
+    require_once __DIR__ . "/includes/scanner.php";
+    $uploadError = null;
+    $attachmentPath = null;
+    if (!empty($_FILES['attachment']['name'])) {
+        $attachmentPath = dms_store_upload($_FILES['attachment'], $uploadError);
+    }
+    if ($attachmentPath === null) {
         $attachmentQuery = "SELECT attachment FROM ordinance WHERE id = $id";
         $result = mysqli_query($conn, $attachmentQuery);
         $row = mysqli_fetch_assoc($result);
-        $attachmentPath = $row['attachment'];
+        $attachmentPath = $row ? $row['attachment'] : '';
     }
+    $attachmentPath = mysqli_real_escape_string($conn, $attachmentPath);
     $sql = "UPDATE `ordinance` SET 
                     `mo_no`='$moNo', 
                     `title`='$title', 
@@ -50,17 +51,19 @@ if(isset($_POST['save'])){
     $conn->query($log_sql);
 
     if($query) {
+        // Extra PDFs from the scanner (Separate PDFs) → additional attachments
+        $scanErrors = dms_ra_store_posted_extras($conn, 'ordinance', $id, 'scan_extra');
+        echo dms_scan_clear_script('ordinance:' . $id);
         echo "<script>
                 document.addEventListener('DOMContentLoaded', function() {
                     Swal.fire({
-                        icon: 'success',
-                        title: 'Ordinance Updated',
-                        text: 'The ordinance has been successfully updated.',
+                        icon: " . json_encode($uploadError ? 'warning' : 'success') . ",
+                        title: " . json_encode($uploadError ? 'Updated, but the file was not uploaded' : 'Ordinance Updated') . ",
+                        text: " . json_encode(($uploadError ? $uploadError . ' The previous attachment was kept.' : 'The ordinance has been successfully updated.') . dms_scan_errors_note($scanErrors)) . ",
                         confirmButtonText: 'OK'
-                    }).then((result) => {
-                        if (result.isConfirmed) {
-                            window.location.href = 'files-ordinances.php';
-                        }
+                    }).then(() => {
+                        // OK, Esc or the phone's Back: return to the list already in history
+                        DmsNav.returnTo('files-ordinances.php');
                     });
                 });
               </script>";    
@@ -84,7 +87,7 @@ if(isset($_POST['save'])){
 <!DOCTYPE html>
 <html lang="en">
 
-<?php include "header.php"; ?>
+<?php include "header.php"; require_once __DIR__ . "/includes/scanner.php"; ?>
 
 <head>
     <!-- Include SweetAlert CSS and JS -->
@@ -168,14 +171,14 @@ if(isset($_POST['save'])){
         <!--**********************************
             Content body start
         ***********************************-->
-        <div class="content-body" style="background-color: #f1f9f1">
+        <div class="content-body">
             <div class="container-fluid" >
                 <!-- row -->
                 <div class="row d-flex justify-content-center">
-                    <div class="col-xl-8 col-xxl-12 items-center">                        
+                    <div class="col-xl-8 col-xxl-12 items-center dms-form-wrap">                        
                         <div class="card" style="align-self: center;">
-                            <div class="card-header d-flex justify-content-center">
-                                <h4 class="card-title text-center" style="color: #098209; ">EDIT ORDINANCE</h4>
+                            <div class="card-header">
+                                <div><h4 class="card-title mb-0">Edit Ordinance</h4><p class="dms-card-sub">Update the details below, then save your changes.</p></div>
                             </div>
                             <?php 
                                 include "connect.php";
@@ -199,37 +202,37 @@ if(isset($_POST['save'])){
                                             </div>
                                         </div>
                                         <div class="form-group row">
-                                            <label class="col-sm-3 col-form-label" style="color: #000000">Resolution No. / MO No.: </label>
+                                            <label class="col-sm-3 col-form-label">Resolution No. / MO No.: </label>
                                             <div class="col-sm-9">
                                                 <input type="text" class="form-control" value="<?php echo $row['mo_no']?>" id="moNo" name="moNo">
                                             </div>
                                         </div>
                                         <div class="form-group row">
-                                            <label class="col-sm-3 col-form-label" style="color:#000000">Title:</label>
+                                            <label class="col-sm-3 col-form-label">Title:</label>
                                             <div class="col-sm-9">
                                                 <textarea class="form-control" id="title" name="title" rows="1" style="resize: none; overflow: hidden;"><?php echo htmlspecialchars_decode($row['title']); ?></textarea>
                                             </div>
                                         </div>
                                         <div class="form-group row">
-                                            <label class="col-sm-3 col-form-label" style="color:#000000">Date Adopted:</label>
+                                            <label class="col-sm-3 col-form-label">Date Adopted:</label>
                                             <div class="col-sm-9">
                                                 <input type="date" class="form-control" value="<?php echo $row['date_adopted']?>" id="dateAdopted" name="dateAdopted">
                                             </div>
                                         </div>
                                         <!-- <div class="form-group row">
-                                            <label class="col-sm-3 col-form-label" style="color:#000000">Description:</label>
+                                            <label class="col-sm-3 col-form-label">Description:</label>
                                             <div class="col-sm-9">
                                                 <textarea class="form-control" style="resize: none;" rows="4" value=" id="description" name="description"></textarea>
                                             </div>
                                         </div> -->
                                         <div class="form-group row">
-                                            <label class="col-sm-3 col-form-label" style="color:#000000">Author / Sponsor:</label>
+                                            <label class="col-sm-3 col-form-label">Author / Sponsor:</label>
                                             <div class="col-sm-9">
                                                 <textarea class="form-control" id="authorSponsor" name="authorSponsor" rows="1" style="resize: none; overflow: hidden;"><?php echo htmlspecialchars_decode($row['author_sponsor']); ?></textarea>
                                             </div>
                                         </div>
                                         <div class="form-group row">
-                                            <label class="col-sm-3 col-form-label" style="color: #000000">Status:</label>
+                                            <label class="col-sm-3 col-form-label">Status:</label>
                                             <div class="col-sm-9">
                                                 <select id="remarks" name="remarks" class="form-control" onchange="toggleDateFields()">
                                                     <option value="" <?php echo ($selectedRemarks == '') ? 'selected' : ''; ?>>Choose...</option>
@@ -250,31 +253,31 @@ if(isset($_POST['save'])){
                                         </div>
                                         <div id="dateFields">
                                             <div class="form-group row" id="forwardedDateField" style="display: none;">
-                                                <label class="col-sm-3 col-form-label" style="color:#000000;">Date Forwarded to LCE:</label>
+                                                <label class="col-sm-3 col-form-label">Date Forwarded to LCE:</label>
                                                 <div class="col-sm-9">
                                                     <input type="date" class="form-control" value="<?php echo $row['date_fwd']?>" id="dateForwarded" name="dateForwarded">
                                                 </div>
                                             </div>
                                             <div class="form-group row" id="notesField" style="display: none;">
-                                                <label class="col-sm-3 col-form-label" style="color:#000000">Remarks/Notes:</label>
+                                                <label class="col-sm-3 col-form-label">Remarks/Notes:</label>
                                                 <div class="col-sm-9">
                                                     <textarea class="form-control" id="notes" name="notes" rows="1" style="resize: none; overflow: hidden;"><?php echo htmlspecialchars_decode($row['notes']); ?></textarea>
                                                 </div>
                                             </div>
                                             <div class="form-group row" id="signedDateField" style="display: none;">
-                                                <label class="col-sm-3 col-form-label" style="color:#000000">Date Signed by LCE:</label>
+                                                <label class="col-sm-3 col-form-label">Date Signed by LCE:</label>
                                                 <div class="col-sm-9">
                                                     <input type="date" class="form-control" value="<?php echo $row['date_signed']?>" id="dateSigned" name="dateSigned">
                                                 </div>
                                             </div>
                                             <div class="form-group row" id="spResoNoField" style="display: none;">
-                                                <label class="col-sm-3 col-form-label" style="color:#000000">SP Resolution No:</label>
+                                                <label class="col-sm-3 col-form-label">SP Resolution No:</label>
                                                 <div class="col-sm-9">
                                                     <input type="text" class="form-control" value="<?php echo $row['sp_resoNo']?>" id="spResoNo" name="spResoNo">
                                                 </div>
                                             </div>
                                             <div class="form-group row" id="sbApprovalDateField" style="display: none;">
-                                                <label class="col-sm-3 col-form-label" style="color:#000000">SP Approval:</label>
+                                                <label class="col-sm-3 col-form-label">SP Approval:</label>
                                                 <div class="col-sm-9">
                                                     <input type="date" class="form-control" value="<?php echo $row['sp_approval']?>" id="dateApproved" name="dateApproved">
                                                 </div>
@@ -282,7 +285,7 @@ if(isset($_POST['save'])){
                                         </div>
                                         <div class="input-group mb-3">
                                             <div class="input-group-prepend">
-                                                <span class="input-group-text" style="background-color: #098209;"> <i class="fa fa-paperclip"></i></span>
+                                                <span class="input-group-text"> <i class="fa fa-paperclip"></i></span>
                                             </div>
                                             <div class="custom-file">
                                                 <input type="file" class="custom-file-input" id="attachment" value="attachment" name="attachment" onchange="updateFileName('attachmentLabel')">
@@ -291,12 +294,14 @@ if(isset($_POST['save'])){
                                                 </label>
                                             </div>
                                             <div class="input-group-append">
+                                                <?php echo dms_scan_button(['mode' => 'form', 'module' => 'ordinance', 'record_id' => $row['id'], 'field' => 'attachment', 'input' => 'attachment', 'extra_field' => 'scan_extra[]', 'label' => 'Ordinance ' . $row['mo_no']]); ?>
                                                 <button class="btn btn-danger" type="button" onclick="removeFile()"><i class="fa fa-close"></i></button>
                                             </div>
                                         </div>
-                                        <div class="form-group row d-flex justify-content-center">
-                                            <button type="submit" class="btn btn-primary" id="save_btn" name="save" value="Save Data" style="background-color: #098209; border: none; width: 100px; color: #FFFFFF;">Update</button>
-                                            <a href="#" class="btn btn-danger ml-2" id="cancel_btn" name="cancel" value="Cancel" data-href="files-ordinances.php" style="background-color: red; border: none; width: 100px; color: #FFFFFF;">Cancel</a>
+                                        <?php dms_ra_render_list($conn, 'ordinance', $row['id'], true); ?>
+                                        <div class="form-group row d-flex justify-content-center dms-form-actions">
+                                            <button type="submit" class="btn btn-primary" id="save_btn" name="save" value="Save Data">Update</button>
+                                            <a href="#" class="btn btn-light" id="cancel_btn" name="cancel" value="Cancel" data-href="files-ordinances.php">Cancel</a>
                                         </div>
                                     </form>
                                 </div>
@@ -427,12 +432,13 @@ if(isset($_POST['save'])){
                 confirmButtonText: 'Yes, cancel it!'
             }).then((result) => {
                 if (result.isConfirmed) {
-                    window.location.href = redirectUrl;
+                    DmsNav.returnTo(redirectUrl);
                 }
             });
         });
     </script>
     
+    <?php dms_scanner_assets(); // Scan Document (includes/scanner.php) ?>
 </body>
 
 </html>

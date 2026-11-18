@@ -58,7 +58,7 @@ if ($current) {
                     text: 'Organization chart has been updated for the term: " . date('F j, Y', strtotime($term_start)) . " – " . date('F j, Y', strtotime($term_end)) . "',
                     confirmButtonColor: '#098209'
                 }).then(() => {
-                    window.location.href = 'files-officials.php';
+                    DmsNav.returnTo('files-officials.php');
                 });
             });
         </script>";
@@ -74,7 +74,7 @@ if ($current) {
                     text: 'The most recent term has no officials. Nothing was published.',
                     confirmButtonColor: '#d33'
                 }).then(() => {
-                    window.location.href = 'files-officials.php';
+                    DmsNav.returnTo('files-officials.php');
                 });
             });
         </script>";
@@ -92,7 +92,7 @@ if ($current) {
                 text: 'No term found in the officials table to publish.',
                 confirmButtonColor: '#d33'
             }).then(() => {
-                window.location.href = 'files-officials.php';
+                DmsNav.returnTo('files-officials.php');
             });
         });
     </script>";

@@ -31,6 +31,9 @@ if (isset($_GET["id"]) && is_numeric($_GET["id"])) {
             mysqli_stmt_execute($stmt);
 
             if (mysqli_stmt_affected_rows($stmt) > 0) {
+                // Additional (scanned) attachments of this record
+                require_once __DIR__ . '/includes/record_attachments.php';
+                dms_ra_delete_for_record($conn, 'resolution', $id, true);
                 // Log the deletion
                 $log_sql = "INSERT INTO history_log (action, file_type, file_id, title) 
                             VALUES ('Deleted', 'Resolution', ?, ?)";

@@ -35,26 +35,25 @@
         <!--**********************************
             Content body start
         ***********************************-->
-        <div class="content-body" style="background-color: #f1f9f1">
+        <div class="content-body">
             <div class="container-fluid">
+                <?php
+                    require_once "includes/history_timeline.php"; // Table / Timeline switch (top of the card)
+                    require_once "includes/report_data.php"; // dms_report_row_key() for the rows; printing/exporting is in the Reports popup (sidebar)
+                    require_once "includes/bulk_select.php"; // Select / Select all (admin and master)
+                    $canEdit = ($role === 'admin' || $role === 'master');
+                ?>
                 <!-- row -->
                 <div class="row">
                     <div class="col-12">
                         <div class="card">
-                            <div class="card-header d-flex justify-content-between align-items-center p-3 mt-4">
-                                <h1 class="card-title flex-grow-1 fs-4 fw-bold text-dark text-center" style="color: #000000">LIST OF ORDINANCES</h1>
-                                <div class="button-container d-flex justify-content-end"> 
-                                    <?php if ($role === 'admin' || $role === 'master') { ?>
-                                        <a href="addordinance.php">
-                                            <button type="button" class="btn btn-primary" style="background-color: #098209; color:#FFFFFF; border: none;"><i class="fa fa-plus"></i>&nbsp;New Ordinance</button>
-                                        </a>
-                                    <?php } ?>
-                                </div>
-                            </div>
-                            <div class="card-body">
+                            <div class="card-body dms-ht-host">
+                                <div class="dms-card-tools"><?php dms_history_toggle(); ?></div>
+                                <?php if ($canEdit) { dms_bulk_selectbar('ordinances'); } ?>
                                 <div class="table-responsive">
-                                    <table id="example" class="display" style="min-width: 845px">
+                                    <table id="example" class="display dms-stack"<?php echo $canEdit ? ' data-bulk-table data-bulk-type="ordinance" data-bulk-noun="ordinance"' : ''; ?>>
                                         <colgroup>
+                                            <?php if ($canEdit) { ?><col class="dms-ob-check-col"><?php } ?>
                                             <col style="width: 15%;">
                                             <col style="width: 25%;">
                                             <col style="width: 15%;">
@@ -62,17 +61,18 @@
                                             <col style="width: 15%;">
                                             <col style="width: 15%;">
                                         </colgroup>
-                                        <thead class="text-center" style="background-color: #098209; color: #FFFFFF;">
+                                        <thead class="text-center">
                                             <tr>
-                                                <th style="color: #FFFFFF;" data-orderable="false">RES NO./MO NO.</th>
-                                                <th style="color: #FFFFFF;" data-orderable="false">TITLE</th>
-                                                <th style="color: #FFFFFF;">DATE ADOPTED</th>
-                                                <th style="color: #FFFFFF;" data-orderable="false">AUTHOR/SPONSOR</th>
-                                                <th style="color: #FFFFFF;" data-orderable="false">REMARKS</th>
-                                                <th style="color: #FFFFFF;" data-orderable="false">ACTION</th>
+                                                <?php if ($canEdit) { dms_bulk_head_check(); } ?>
+                                                <th data-orderable="false">RES NO./MO NO.</th>
+                                                <th data-orderable="false">TITLE</th>
+                                                <th>DATE ADOPTED</th>
+                                                <th data-orderable="false">AUTHOR/SPONSOR</th>
+                                                <th data-orderable="false">REMARKS</th>
+                                                <th data-orderable="false">ACTION</th>
                                             </tr>
                                         </thead>
-                                        <tbody style="color: #000000; border:#000000;">
+                                        <tbody>
                                             <?php
                                                 include "connect.php";
 
@@ -85,16 +85,19 @@
                                                     die("SQL Error: " . $conn->error);
                                                 }
 
-                                                while ($row = mysqli_fetch_assoc($result)) {
+                                                // Fetched once: the table and the history timeline both render from $rows.
+                                                $rows = $result->fetch_all(MYSQLI_ASSOC);
+                                                foreach ($rows as $row) {
                                                     ?>
-                                                    <tr>
-                                                        <td style="border-bottom: 1px solid #098209; border-left: 1px solid #098209;"><?php echo $row["mo_no"] ?></td>
-                                                        <td style="border-bottom: 1px solid #098209;"><?php echo $row["title"] ?></td>
-                                                        <td style="border-bottom: 1px solid #098209;"><?php echo $row["date_adopted"] ?></td> 
-                                                        <td style="border-bottom: 1px solid #098209;"><?php echo $row["author_sponsor"] ?></td>     
-                                                        <td style="border-bottom: 1px solid #098209;">
+                                                    <tr<?php echo $canEdit ? ' class="dms-bulk-row" tabindex="0"' : ''; ?> data-id="<?php echo (int) $row['id']; ?>" data-date="<?php echo htmlspecialchars($row["date_adopted"]); ?>" data-filter="<?php echo htmlspecialchars(dms_report_row_key('ordinance', $row)); ?>">
+                                                        <?php if ($canEdit) { dms_bulk_row_check(trim($row['mo_no']) !== '' ? 'ordinance ' . $row['mo_no'] : 'this ordinance'); } ?>
+                                                        <td><?php echo $row["mo_no"] ?></td>
+                                                        <td><?php echo $row["title"] ?></td>
+                                                        <td><?php echo $row["date_adopted"] ?></td> 
+                                                        <td><?php echo $row["author_sponsor"] ?></td>     
+                                                        <td>
                                                             <div class="text-center d-flex justify-content-center gap-2">
-                                                                <a style="color: #000000" data-placement="bottom" data-toggle="tooltip" title="
+                                                                <a class="dms-pill <?php echo isset(["Forwarded to LCE"=>1,"Signed by LCE"=>1,"SP Approval"=>1,"Disapprove"=>1][$row["remarks"]]) ? ["Forwarded to LCE"=>"is-amber","Signed by LCE"=>"is-blue","SP Approval"=>"is-green","Disapprove"=>"is-red"][$row["remarks"]] : "is-plain"; ?>" data-placement="bottom" data-toggle="tooltip" title="
                                                                     <?php
                                                                         $d_forward = !empty($row["date_fwd"]) ? $row["date_fwd"] : "N/A";
                                                                         $d_signed = !empty($row["date_signed"]) ? $row["date_signed"] : "N/A";
@@ -114,23 +117,23 @@
                                                                 </a>
                                                             </div>
                                                         </td>
-                                                        <!-- <td style="border-bottom: 1px solid #098209;">
+                                                        <!-- <td>
                                                             <div class="container">
-                                                                <a style="color: #000000" id="popoverData" class="btn" href="#" data-content="Forwarded to LCE: <?php echo $row["d_forward"] ?>" rel="popover" 
+                                                                <a id="popoverData" class="btn" href="#" data-content="Forwarded to LCE: <?php echo $row["d_forward"] ?>" rel="popover" 
                                                                 data-placement="bottom" data-trigger="hover"><?php echo $row["remarks"] ?></a>
                                                             </div>
                                                         </td> -->
-                                                        <td style="border-bottom: 1px solid #098209; border-right: 1px solid #098209; text-align: center; vertical-align: middle;">
-                                                            <div class="d-flex justify-content-center align-items-center gap-2">
+                                                        <td style="text-align: center; vertical-align: middle;">
+                                                            <div class="dms-row-actions">
                                                                 <a href="viewordinance.php?id=<?php echo $row["id"] ?>" class="btn btn-primary btn-sm d-flex align-items-center justify-content-center p-2">
-                                                                    <i class="fa fa-eye" aria-hidden="true" style="color: #FFFFFF;"></i>
+                                                                    <i class="fa fa-eye" aria-hidden="true"></i>
                                                                 </a>
                                                                 <?php if ($role === 'admin' || $role === 'master') { ?>
                                                                     <a onclick="confirmEdit(<?php echo $row['id']; ?>)" class="btn btn-success btn-sm d-flex align-items-center justify-content-center p-2 ml-1 mr-1">
-                                                                        <i class="fa fa-edit" aria-hidden="true" style="color: #FFFFFF;"></i>
+                                                                        <i class="fa fa-edit" aria-hidden="true"></i>
                                                                     </a>
                                                                     <a onclick="confirmDelete(<?php echo $row['id']; ?>)" class="btn btn-danger btn-sm d-flex align-items-center justify-content-center p-2">
-                                                                        <i class="fa fa-trash" aria-hidden="true" style="color: #FFFFFF"></i>
+                                                                        <i class="fa fa-trash" aria-hidden="true"></i>
                                                                     </a>
                                                                 <?php } ?>
                                                             </div>
@@ -142,6 +145,23 @@
                                         </tbody>
                                     </table>
                                 </div>
+                                <?php
+                                    $items = [];
+                                    foreach ($rows as $row) {
+                                        $items[] = [
+                                            'id'         => $row['id'],
+                                            'date'       => $row['date_adopted'],
+                                            'date_label' => 'Adopted',
+                                            'url'        => 'viewordinance.php?id=' . (int) $row['id'],
+                                            'number'     => $row['mo_no'],
+                                            'title'      => $row['title'],
+                                            'type'       => 'Ordinance',
+                                            'meta'       => ['Author/Sponsor' => $row['author_sponsor']],
+                                            'pill'       => [$row['remarks'], dms_remarks_pill_class($row['remarks'])],
+                                        ];
+                                    }
+                                    dms_history_render($items);
+                                ?>
                             </div>
                         </div>
                     </div>
@@ -222,7 +242,7 @@
                                 showConfirmButton: false,
                                 timer: 2000
                             });
-                            window.location.href = 'deleteordinance.php?id=' + id;
+                            DmsNav.go('deleteordinance.php?id=' + id, { replace: true }); // replace: the list comes back in place of the delete
                         }
                     });
                 }
@@ -261,7 +281,7 @@
                 allowOutsideClick: () => !Swal.isLoading()
             }).then((result) => {
                 if (result.isConfirmed) {
-                    window.location.href = 'editordinance.php?id=' + id;
+                    DmsNav.go('editordinance.php?id=' + id);
                 }
             });
         }
@@ -271,14 +291,26 @@
                 $("#example").DataTable().destroy(); // Destroy existing DataTable instance
             }
 
+            // Admins/masters have a leading checkbox column (multi-select), so DATE ADOPTED shifts by one.
+            var hasCheck = $("#example [data-bulk-check-all]").length > 0;
             $("#example").DataTable({
-                "order": [[2, "desc"]], // Sort by the 4th column (index 3, zero-based) in descending order
+                "order": [[hasCheck ? 3 : 2, "desc"]], // Sort by DATE ADOPTED, newest first
+                "columnDefs": hasCheck ? [{ "targets": 0, "orderable": false, "searchable": false }] : [],
                 "destroy": true // Ensure previous instance is removed
             });
         });
 
     </script>
+    <!-- Select / Select all: delete several ordinances at once -->
+    <script src="./js/bulk-select.js?v=<?php echo filemtime(__DIR__ . '/js/bulk-select.js'); ?>"></script>
 
+
+    <!-- Report toolbar: filters + Print / PDF / Excel -->
+    <script src="./js/report-toolbar.js?v=<?php echo filemtime(__DIR__ . '/js/report-toolbar.js'); ?>"></script>
+    <!-- History "Show in list": ?locate=id pages to the row and flashes it -->
+    <script src="./js/locate-row.js?v=<?php echo filemtime(__DIR__ . '/js/locate-row.js'); ?>"></script>
+    <!-- History timeline: Table | Timeline switch; cards follow the table's search and filters -->
+    <script src="./js/history-timeline.js?v=<?php echo filemtime(__DIR__ . '/js/history-timeline.js'); ?>"></script>
 </body>
 
 </html>

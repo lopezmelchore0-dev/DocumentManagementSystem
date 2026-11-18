@@ -1,16 +1,16 @@
 <!DOCTYPE html>
 <html lang="en">
 
-<?php include "header.php"; ?>
+<?php include "header.php"; require_once __DIR__ . "/includes/scanner.php"; ?>
 
-<body>
+<body<?php echo $dmsEmbed ? ' class="dms-embed"' : ''; ?>>
 
     <!--**********************************
         Main wrapper start
     ***********************************-->
     <div id="main-wrapper">
 
-        <?php include "sidebar.php"; ?>
+        <?php if (!$dmsEmbed) include "sidebar.php"; ?>
 
         <!--**********************************
             Content body start
@@ -19,18 +19,19 @@
             <div class="container-fluid" >
                 <!-- row -->
                 <div class="row d-flex justify-content-center">
-                    <div class="col-xl-8 col-xxl-12 items-center">                        
+                    <div class="col-xl-8 col-xxl-12 items-center dms-form-wrap">                        
                         <div class="card" style="align-self: center;">
-                            <div class="card-header d-flex justify-content-center">
-                                <h4 class="card-title text-center" style="color: #098209; ">ADD RESOLUTION</h4>
+                            <div class="card-header">
+                                <div><h4 class="card-title mb-0">Add Resolution</h4><p class="dms-card-sub">Fill in the details below, then save.</p></div>
                             </div>
                             
                             <div class="card-body">
                                 <div class="basic-form">
-                                    <form id="myForm" action="addresolution.php" method="post" enctype="multipart/form-data">
+                                    <form id="myForm" action="addresolution.php<?php echo $dmsEmbed ? '?embed=1' : ''; ?>" method="post" enctype="multipart/form-data">
                                     <?php
                                         if (isset($_POST['save'])) {
                                             include("connect.php");
+                                            require_once __DIR__ . "/includes/upload_helper.php";
 
                                             $resoNo = $_POST['resoNo'];
                                             $title = $_POST['title'];
@@ -44,11 +45,7 @@
                                             $spResoNo = $_POST['spResoNo'];
                                             $dateApproved = $_POST['dateApproved'];
                                             $attachmentPath = "";
-
-                                            if (!empty($_FILES['attachment']['name'])) {
-                                                $attachmentPath = "uploads/" . basename($_FILES['attachment']['name']);
-                                                move_uploaded_file($_FILES['attachment']['tmp_name'], $attachmentPath);
-                                            }
+                                            $uploadError = null;
 
                                             // Check if Resolution No. OR Title already exists (case insensitive)
                                             $check_sql = "SELECT * FROM resolution WHERE LOWER(reso_no) = LOWER(?) AND LOWER(title) = LOWER(?)";
@@ -67,6 +64,10 @@
                                                             confirmButtonText: 'OK'
                                                         });
                                                     </script>";
+                                            } elseif (!empty($_FILES['attachment']['name'])
+                                                    && ($attachmentPath = dms_store_upload($_FILES['attachment'], $uploadError)) === null) {
+                                                // Upload failed: do not save a record that points at a missing file.
+                                                echo dms_upload_error_script($uploadError . ' The resolution was not saved.');
                                             } else {
                                                 // Insert new resolution
                                                 $sql = "INSERT INTO resolution (reso_no, title, d_adopted, author_sponsor, co_author, remarks, d_forward, d_signed, sp_resoNo, d_approved, attachment, notes) 
@@ -77,6 +78,9 @@
 
                                                 if ($stmt->execute()) {
                                                     $last_id = $conn->insert_id;
+                                                    // Extra PDFs from the scanner (Separate PDFs) → additional attachments
+                                                    $scanErrors = dms_ra_store_posted_extras($conn, 'resolution', $last_id, 'scan_extra');
+                                                    echo dms_scan_clear_script('resolution:add');
 
                                                     // Insert into History Log
                                                     $log_sql = "INSERT INTO history_log (action, file_type, file_id, title) 
@@ -90,9 +94,9 @@
                                                             Swal.fire({
                                                                 icon: 'success',
                                                                 title: 'Resolution Created',
-                                                                text: 'The resolution has been successfully created.',
+                                                                text: " . json_encode('The resolution has been successfully created.' . dms_scan_errors_note($scanErrors)) . ",
                                                                 confirmButtonText: 'OK'
-                                                            }).then(() => { window.location.href = 'files-resolution.php'; });
+                                                            }).then(() => { dmsAddDone('files-resolution.php'); });
                                                         </script>";
                                                 } else {
                                                     echo "<script>
@@ -114,37 +118,37 @@
                                         ?>
 
                                         <div class="form-group row">
-                                            <label class="col-sm-3 col-form-label" style="color: #000000">Resolution No.:</label>
+                                            <label class="col-sm-3 col-form-label">Resolution No.:</label>
                                             <div class="col-sm-9">
                                                 <input type="text" class="form-control" placeholder="Please type here..." id="resoNo" name="resoNo"> 
                                             </div>
                                         </div>
                                         <div class="form-group row">
-                                             <label class="col-sm-3 col-form-label" style="color:#000000">Title:</label>
+                                             <label class="col-sm-3 col-form-label">Title:</label>
                                              <div class="col-sm-9">
                                                 <textarea class="form-control dynamic-textarea" style="resize: none; overflow: hidden;" rows="1" placeholder="Please type here..." id="title" name="title"></textarea>
                                              </div>
                                         </div>
                                         <div class="form-group row">
-                                            <label class="col-sm-3 col-form-label" style="color:#000000;">Date Adopted:</label>
+                                            <label class="col-sm-3 col-form-label">Date Adopted:</label>
                                             <div class="col-sm-9">
                                                 <input type="date" class="form-control" id="dateAdopted" name="dateAdopted" disabled>
                                             </div>
                                         </div>
                                         <div class="form-group row">
-                                             <label class="col-sm-3 col-form-label" style="color:#000000">Author / Sponsor:</label>
+                                             <label class="col-sm-3 col-form-label">Author / Sponsor:</label>
                                              <div class="col-sm-9">
                                                 <textarea class="form-control dynamic-textarea" style="resize: none; overflow: hidden;" rows="1" placeholder="Please type here..." id="authorSponsor" name="authorSponsor"></textarea>
                                              </div>
                                         </div>
                                         <div class="form-group row">
-                                            <label class="col-sm-3 col-form-label" style="color: #000000">Co-Author:</label>
+                                            <label class="col-sm-3 col-form-label">Co-Author:</label>
                                             <div class="col-sm-9">
                                                 <input type="text" class="form-control" placeholder="Please type here..." id="coAuthor" name="coAuthor">
                                             </div>
                                         </div>
                                         <div class="form-group row">
-                                            <label class="col-sm-3 col-form-label" style="color: #000000">Status:</label>
+                                            <label class="col-sm-3 col-form-label">Status:</label>
                                             <div class="col-sm-9">
                                                 <select id="remarks" name="remarks" class="form-control" onchange="toggleDateFields()" disabled>
                                                     <option value="" selected>Choose...</option>
@@ -157,31 +161,31 @@
                                         </div>
                                         <div id="dateFields" style="display: none;">
                                             <div class="form-group row" style="visibility: hidden; opacity: 0;" id="forwardedDateField">
-                                                <label class="col-sm-3 col-form-label" style="color:#000000;">Date Forwarded to LCE:</label>
+                                                <label class="col-sm-3 col-form-label">Date Forwarded to LCE:</label>
                                                 <div class="col-sm-9">
                                                     <input type="date" class="form-control" id="dateForwarded" name="dateForwarded" disabled>
                                                 </div>
                                             </div>
                                             <div class="form-group row" style="visibility: hidden; opacity: 0;" id="notesField">
-                                                <label class="col-sm-3 col-form-label" style="color:#000000">Remarks/Notes:</label>
+                                                <label class="col-sm-3 col-form-label">Remarks/Notes:</label>
                                                 <div class="col-sm-9">
                                                     <textarea class="form-control" style="resize: none;" rows="4" placeholder="Please type here..." id="notes" name="notes" disabled></textarea>
                                                 </div>
                                             </div>
                                             <div class="form-group row" style="visibility: hidden; opacity: 0;" id="signedDateField">
-                                                <label class="col-sm-3 col-form-label" style="color:#000000">Date Signed by LCE:</label>
+                                                <label class="col-sm-3 col-form-label">Date Signed by LCE:</label>
                                                 <div class="col-sm-9">
                                                     <input type="date" class="form-control" id="dateSigned" name="dateSigned" disabled>
                                                 </div>
                                             </div>
                                             <div class="form-group row" style="visibility: hidden; opacity: 0;" id="spResoNoField">
-                                                <label class="col-sm-3 col-form-label" style="color:#000000">SP Resolution No:</label>
+                                                <label class="col-sm-3 col-form-label">SP Resolution No:</label>
                                                 <div class="col-sm-9">
                                                     <input type="text" class="form-control" placeholder="Please type here..." id="spResoNo" name="spResoNo" disabled>
                                                 </div>
                                             </div>
                                             <div class="form-group row" style="visibility: hidden; opacity: 0;" id="sbApprovalDateField">
-                                                <label class="col-sm-3 col-form-label" style="color:#000000">SP Approval:</label>
+                                                <label class="col-sm-3 col-form-label">SP Approval:</label>
                                                 <div class="col-sm-9">
                                                     <input type="date" class="form-control" id="dateApproved" name="dateApproved" disabled>
                                                 </div>
@@ -189,19 +193,20 @@
                                         </div>
                                         <div class="input-group mb-3">
                                             <div class="input-group-prepend">
-                                                <span class="input-group-text" style="background-color: #098209;"> <i class="fa fa-paperclip"></i></span>
+                                                <span class="input-group-text"> <i class="fa fa-paperclip"></i></span>
                                             </div>
                                             <div class="custom-file">
                                                 <input type="file" class="custom-file-input" id="attachment" name="attachment" accept=".pdf" onchange="updateFileName()">
                                                 <label class="custom-file-label text-truncate" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:block;" for="attachment">Choose file</label>
                                             </div>
                                             <div class="input-group-append">
+                                                <?php echo dms_scan_button(['mode' => 'form', 'module' => 'resolution', 'field' => 'attachment', 'input' => 'attachment', 'extra_field' => 'scan_extra[]', 'label' => 'Resolution', 'label_from' => 'resoNo']); ?>
                                                 <button class="btn btn-danger" type="button" onclick="removeFile()"><i class="fa fa-close"></i></button>
                                             </div>
                                         </div>
-                                        <div class="form-group row d-flex justify-content-center">
-                                            <button type="submit" class="btn btn-primary" id="save_btn" name="save" value="Save Data" style="background-color: #098209; border: none; width: 100px; color: #FFFFFF;">Save</button>
-                                            <a href="#" class="btn btn-danger ml-2" id="cancel_btn" name="cancel" value="Cancel" data-href="files-resolution.php" style="background-color: red; border: none; width: 100px; color: #FFFFFF;">Cancel</a>
+                                        <div class="form-group row d-flex justify-content-center dms-form-actions">
+                                            <button type="submit" class="btn btn-primary" id="save_btn" name="save" value="Save Data">Save</button>
+                                            <a href="#" class="btn btn-light" id="cancel_btn" name="cancel" value="Cancel" data-href="files-resolution.php">Cancel</a>
                                         </div>
                                     </form>
                                 </div>
@@ -214,7 +219,7 @@
             <div id="loadingOverlay" style="display: none; position: fixed; z-index: 9999; background: rgba(0,0,0,0.5); top: 0; left: 0; width: 100%; height: 100%; text-align: center;">
                 <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);">
                     <div class="spinner"></div>
-                    <p style="color: white; font-size: 1.2em;">Please wait...</p>
+                    <p style="font-size: 1.2em;">Please wait...</p>
                 </div>
             </div>
         </div>
@@ -642,12 +647,13 @@
                 confirmButtonText: 'Yes, cancel it!'
             }).then((result) => {
                 if (result.isConfirmed) {
-                    window.location.href = redirectUrl;
+                    dmsAddLeave(redirectUrl);
                 }
             });
         });
     </script>
     
+    <?php dms_scanner_assets(); // Scan Document (includes/scanner.php) ?>
 </body>
 
 </html>

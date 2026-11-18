@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scanner test harness</title>
+<link rel="stylesheet" href="../../../css/doc-scanner.css">
+<script>
+  // ?noworker=1: run the scanner the way browsers without Web Workers do (everything on the page)
+  if (/[?&]noworker=1/.test(location.search)) { window.Worker = undefined; }
+  // SweetAlert stand-in: every dialog is confirmed (the real pages load SweetAlert2)
+  window.__dialogs = [];
+  window.Swal = {
+    fire: function (o) { window.__dialogs.push((o && (o.title || o.text)) || ''); return Promise.resolve({ isConfirmed: true, isDenied: false }); },
+    isVisible: function () { return false; }
+  };
+  window.DMS_SCANNER_ASSETS = { worker: 'js/scanner/dsc-worker.js', core: 'js/scanner/dsc-core.js', cv: 'vendor/opencv/opencv.js' };
+</script>
+</head>
+<body>
+<form id="f" onsubmit="return false">
+  <div class="input-group">
+    <input type="file" id="attachment" name="attachment" accept="application/pdf">
+    <button type="button" class="btn dms-scan-btn" data-dms-scan="1" data-mode="form" data-module="resolution" data-record-id=""
+            data-field="attachment" data-input="attachment" data-extra-field="scan_extra[]" data-label="Resolution test"
+            data-label-from="" data-has-main="0" data-session="resolution:add:attachment" data-max-post="41943040" data-max-files="20">Scan Document</button>
+  </div>
+</form>
+<script src="../../../vendor/sortablejs/Sortable.min.js"></script>
+<script src="../../../vendor/jspdf/jspdf.umd.min.js"></script>
+<script src="../../../js/scanner/dsc-core.js"></script>
+<script src="../../../js/doc-scanner.js"></script>
+</body>
+</html>

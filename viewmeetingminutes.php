@@ -40,32 +40,6 @@
             $stmt->close();
         }
 
-        $optRadio = isset($_POST['optradio']) ? $_POST['optradio'] : '';
-
-        // Initialize fields safely
-        $returnNo = isset($_POST['returnNo']) ? mysqli_real_escape_string($conn, $_POST['returnNo']) : '';
-        $returnDate = isset($_POST['returnDate']) ? mysqli_real_escape_string($conn, $_POST['returnDate']) : '';
-        $resolutionNo = isset($_POST['resolutionNo']) ? mysqli_real_escape_string($conn, $_POST['resolutionNo']) : '';
-        $resolutionDate = isset($_POST['resolutionDate']) ? mysqli_real_escape_string($conn, $_POST['resolutionDate']) : '';
-
-        // Use switch case to handle conditions
-        switch ($optRadio) {
-            case 'Approved':
-                $returnNo = "";
-                $returnDate = "";
-                break;
-            case 'Returned':
-                $resolutionNo = "";
-                $resolutionDate = "";
-                break;
-            default:
-                $returnNo = "";
-                $returnDate = "";
-                $resolutionNo = "";
-                $resolutionDate = "";
-                break;
-        }
-
     }
 
     $conn->close();
@@ -83,108 +57,84 @@
         <!--**********************************
             Content body start
         ***********************************-->
-        <div class="content-body" style="background-color: #f1f9f1">
+        <div class="content-body">
             <div class="container-fluid" >
                 <!-- row -->
                  
                 <div class="row d-flex justify-content-center">
-                    <div class="col-xl-8 col-xxl-12 items-center">                        
+                    <div class="col-xl-8 col-xxl-12 items-center dms-form-wrap">                        
                         <div class="card" style="align-self: center;">
-                            <div class="card-header d-flex justify-content-center">
-                                <h4 class="card-title text-center" style="color: #098209; ">VIEW ORDER OF BUSINESS</h4>
+                            <div class="card-header">
+                                <div><h4 class="card-title mb-0">Order of Business details</h4><p class="dms-card-sub">Read-only record. Use View File to open the attachment.</p></div>
                             </div>
                             <?php
                                 include("connect.php");
-                                $id = $_GET['id'];
+                                require_once __DIR__ . "/includes/minutes_workflow.php";
+                                require_once __DIR__ . "/includes/upload_helper.php";
+                                dms_ob_ensure_schema($conn);
+                                $id = isset($_GET['id']) ? intval($_GET['id']) : 0;
                                 $sql = "SELECT * FROM `minutes` WHERE id = $id LIMIT 1";
                                 $result = mysqli_query($conn, $sql);
-                                $row = mysqli_fetch_assoc($result);
+                                $row = $result ? mysqli_fetch_assoc($result) : null;
+                                if (!$row) {
+                                    echo "<script>alert('Invalid Record ID!'); window.location.replace('files-meetingminutes.php');</script>";
+                                    exit;
+                                }
 
-                                // Determine the value for optRadio based on conditions
-                                $optRadio = "";
-                                if ($row['resolutionNo'] != "" && $row['resolutionDate'] != "") {
-                                    $optRadio = "Approved";
-                                } elseif ($row['returnNo'] != "" &&  $row['returnDate'] != "") {
-                                    $optRadio = "Returned";
-                                } 
+                                // Earlier schedules shown with the section / status
+                                $schedules = dms_ob_load_schedules($conn, [$id]);
+                                $schedules = isset($schedules[$id]) ? $schedules[$id] : [];
                             ?>
                             <div class="card-body">
-                                <div class="basic-form">
+                                <div class="basic-form dms-detail">
                                     <form action="<?php htmlspecialchars($_SERVER["PHP_SELF"]) ?>" method="post">
                                         <div class="form-group row">
-                                            <label class="col-sm-3 col-form-label" style="color: #000000">No. of Regular Session</label>
+                                            <label class="col-sm-3 col-form-label">No. of Regular Session</label>
                                             <div class="col-sm-9">
                                                 <input type="text" class="form-control" placeholder="Please type here..." value="<?php echo $row['no_regSession']?>" id="no_regSession" name="no_regSession" disabled>
                                             </div>
                                         </div>
                                         <div class="form-group row">
-                                            <label class="col-sm-3 col-form-label" style="color:#000000">Date:</label>
+                                            <label class="col-sm-3 col-form-label">Date:</label>
                                             <div class="col-sm-9">
                                                 <input type="date" class="form-control" placeholder="Please type here..." value="<?php echo $row['date']?>" id="date" name="date" disabled>
                                             </div>
                                         </div>
-                                        <label style="color: #000000">Attachment for Order of Business:</label>
-                                        <div class="input-group mb-3">
-                                            <input type="text" class="form-control" value="<?php echo $row['genAttachment']; ?>" id="genAttachment" name="genAttachment" disabled>
-                                            <div class="input-group-append">
-                                                <button class="btn btn-primary" style="background-color: #098209; border: none; outline: none;" type="button" onclick="viewFile('<?php echo $row['id']; ?>', 'genAttachment')">View File</button>
-                                            </div>
-                                        </div>
+                                        <label>Attachment for Order of Business:</label>
+                                        <?php require_once __DIR__ . "/includes/scanner.php";
+                                        dms_render_attachment_field($row['id'], 'genAttachment', $row['genAttachment'], dms_scan_can_edit() ? dms_scan_button(['mode' => 'record', 'module' => 'ob', 'record_id' => $row['id'], 'field' => 'genAttachment', 'extra_field' => '', 'label' => 'Order of Business ' . $row['no_regSession'], 'has_main' => dms_attachment_exists($row['genAttachment'])]) : ''); ?>
                                         <div class="form-group row">
-                                            <label class="col-sm-3 col-form-label" style="color: #000000">Resolution No.:</label>
+                                            <label class="col-sm-3 col-form-label">Item No.:</label>
                                             <div class="col-sm-9">
                                                 <input type="text" class="form-control" value="<?php echo $row['resNo']?>" name="resNo" disabled>
                                             </div>
                                         </div>
                                         <div class="form-group row">
-                                            <label class="col-sm-3 col-form-label" style="color: #000000">Title:</label>
+                                            <label class="col-sm-3 col-form-label">Title:</label>
                                             <div class="col-sm-9">
                                                 <textarea class="form-control" id="title" name="title" rows="1" style="resize: none; overflow: hidden;" disabled><?php echo htmlspecialchars_decode($row['title']); ?></textarea>
                                             </div>
                                         </div>
-                                        <!-- Status Field -->
+                                        <!-- Section, status and earlier details -->
                                         <div class="form-group row">
-                                            <label for="status" class="col-sm-3 col-form-label" style="color: #000000">Status:</label>
+                                            <label class="col-sm-3 col-form-label">Section &amp; status:</label>
                                             <div class="col-sm-9">
-                                                <input type="text" class="form-control" value="<?php echo $row['status']?>" name="status" required>
+                                                <?php dms_ob_render_summary($row, $schedules); ?>
                                             </div>
                                         </div>
 
-                                        <div class="form-group row">
-                                            <label for="status" class="col-sm-3 col-form-label" style="color: #000000">Select option if applicable:</label>
-                                            <div class="col-sm-9 mt-2">
-                                                <label class="radio-inline mr-5" style="color: #000000">
-                                                    <input type="radio" name="optradio" class="deselectable-radio" value="Returned" <?php echo ($optRadio === "Returned") ? 'checked' : ''; ?> disabled > Returned
-                                                </label>
-                                                <label class="radio-inline" style="color: #000000">
-                                                    <input type="radio" name="optradio" class="deselectable-radio" value="Approved" <?php echo ($optRadio === "Approved") ? 'checked' : ''; ?> disabled > Approved
-                                                </label>
-                                            </div>
-                                        </div>
-
-                                        <!-- Hidden fields section -->
-                                        <div class="form-group row extra-fields mt-3" style="display: none;">
-                                            <div class="col-sm-12" id="extraFields">
-                                                <!-- Dynamic fields go here -->
-                                            </div>
-                                        </div>
-
-                                        <label style="color: #000000">Upload Attachment as Supporting Documents:</label>
-                                        <div class="input-group mb-3">
-                                            <input type="text" class="form-control" value="<?php echo $row['attachment']; ?>" id="attachment" name="attachment" disabled>
-                                            <div class="input-group-append">
-                                                <button class="btn btn-primary" style="background-color: #098209; border: none; outline: none;" type="button" onclick="viewFile('<?php echo $row['id']; ?>', 'attachment')">View File</button>
-                                            </div>
-                                        </div>
+                                        <label>Upload Attachment as Supporting Documents:</label>
+                                        <?php dms_render_attachment_field($row['id'], 'attachment', $row['attachment'], dms_scan_can_edit() ? dms_scan_button(['mode' => 'record', 'module' => 'ob', 'record_id' => $row['id'], 'field' => 'attachment', 'extra_field' => '1', 'label' => 'OB Item ' . $row['resNo'], 'has_main' => dms_attachment_exists($row['attachment'])]) : '');
+                                        dms_ra_render_list($conn, 'ob', $row['id'], dms_scan_can_edit()); ?>
                                     </form>
                                 </div>
                             </div>
                             <!-- View History Button -->
                             <div class="card-footer d-sm-flex justify-content-between">
                                 <div class="card-footer-link mb-4 mb-sm-0">
-                                    <p class="card-text text-dark d-inline"><?php echo $lastUpdatedText; ?></p>
+                                    <p class="card-text text-muted d-inline"><?php echo $lastUpdatedText; ?></p>
                                 </div>
-                                <button type="button" class="btn text-white" style="background-color: #098209;" data-toggle="modal" data-target="#historyModal">View History</button>
+                                <button type="button" class="btn btn-primary" data-toggle="modal" data-target="#historyModal">View History</button>
                             </div>
 
                             <!-- Modal for Viewing History -->
@@ -197,20 +147,22 @@
                                                 <span aria-hidden="true">&times;</span>
                                             </button>
                                         </div>
-                                        <div class="modal-body d-flex justify-content-center">
-                                            <table class="table table-bordered">
+                                        <div class="modal-body">
+                                            <div class="table-responsive">
+                                            <table class="table table-bordered dms-stack">
                                                 <thead>
                                                     <tr>
-                                                        <th style="color: #000000; font-weight:bold; text-align: center;">Title</th>
-                                                        <th style="color: #000000; font-weight:bold; text-align: center;">Action</th>
-                                                        <th style="color: #000000; font-weight:bold; text-align: center;">Status</th>
-                                                        <th style="color: #000000; font-weight:bold; text-align: center;">Timestamp</th>
+                                                        <th style="font-weight:bold; text-align: center;">Title</th>
+                                                        <th style="font-weight:bold; text-align: center;">Action</th>
+                                                        <th style="font-weight:bold; text-align: center;">Status</th>
+                                                        <th style="font-weight:bold; text-align: center;">Timestamp</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody id="historyTableBody">
                                                     <tr><td colspan="4">Loading history...</td></tr>
                                                 </tbody>
                                             </table>
+                                            </div>
                                         </div>
                                         <!-- <div class="modal-footer">
                                             <button type="button" class="btn btn-danger text-white" data-dismiss="modal">Close</button>
@@ -243,23 +195,7 @@
     <script src="./js/custom.min.js"></script>
 
 
-    <script>
-        function viewFile(id, field) {
-        let filePath = document.getElementById(field).value;
-        
-        if (!filePath) {
-            alert("No file available to view.");
-            return;
-        }
-
-        // Check if filePath is a direct URL or stored in the database
-        if (filePath.startsWith("http") || filePath.endsWith(".pdf")) {
-            window.open(filePath, '_blank');  // Open direct URL
-        } else {
-            window.open(`fetch_pdf.php?id=${id}&field=${field}`, '_blank'); // Fetch from database
-        }
-    }
-    </script>
+    <script src="./js/view-file.js"></script>
 
     <script>
         document.addEventListener("DOMContentLoaded", function () {
@@ -385,78 +321,9 @@
         });
     </script>
 
-<script>
-        document.addEventListener('DOMContentLoaded', function () {
-            const radios = document.querySelectorAll("input[name='optradio']");
-            const extraFieldsContainer = document.querySelector("#extraFields");
-            const extraFieldsRow = document.querySelector(".extra-fields");
-
-            function showExtraFields(selectedValue) {
-                extraFieldsRow.style.display = "block";
-
-                if (selectedValue === "Returned") {
-                    extraFieldsContainer.innerHTML = `
-                        <div class="form-group row">
-                            <label class="col-sm-3 col-form-label" style="color:#000000">Return No.:</label>
-                            <div class="col-sm-9">
-                                <input type="text" class="form-control" value="<?php echo isset($row['returnNo']) ? $row['returnNo'] : ''; ?>" name="returnNo" readonly>
-                            </div>
-                        </div>
-                        <div class="form-group row">
-                            <label class="col-sm-3 col-form-label" style="color:#000000">Return Date:</label>
-                            <div class="col-sm-9">
-                                <input type="date" class="form-control" value="<?php echo isset($row['returnDate']) ? $row['returnDate'] : ''; ?>" name="returnDate" readonly>
-                            </div>
-                        </div>
-                    `;
-                } else if (selectedValue === "Approved") {
-                    extraFieldsContainer.innerHTML = `
-                        <div class="form-group row">
-                            <label class="col-sm-3 col-form-label" style="color:#000000">Resolution No.:</label>
-                            <div class="col-sm-9">
-                                <input type="text" class="form-control" value="<?php echo isset($row['resolutionNo']) ? $row['resolutionNo'] : ''; ?>" name="resolutionNo" readonly>
-                            </div>
-                        </div>
-                        <div class="form-group row">
-                            <label class="col-sm-3 col-form-label" style="color:#000000">Resolution Date Approved:</label>
-                            <div class="col-sm-9">
-                                <input type="date" class="form-control" value="<?php echo isset($row['resolutionDate']) ? $row['resolutionDate'] : ''; ?>" name="resolutionDate" readonly>
-                            </div>
-                        </div>
-                    `;
-                }
-            }
-
-            // Check if a radio button is already selected on page load
-            const selectedRadio = document.querySelector("input[name='optradio']:checked");
-            if (selectedRadio) {
-                showExtraFields(selectedRadio.value);
-            } else {
-                extraFieldsRow.style.display = "none";
-            }
-
-            // Add event listeners to radio buttons
-            radios.forEach(radio => {
-                radio.addEventListener('click', function () {
-                    if (this.checked) {
-                        if (this.previousChecked) {
-                            this.checked = false;
-                            this.previousChecked = false;
-                            extraFieldsRow.style.display = "none";
-                            extraFieldsContainer.innerHTML = "";
-                        } else {
-                            radios.forEach(r => r.previousChecked = false);
-                            this.previousChecked = true;
-                            showExtraFields(this.value);
-                        }
-                    }
-                });
-            });
-        });
-    </script>
-
 
         
+    <?php dms_scanner_assets(); // Scan Document (includes/scanner.php) ?>
 </body>
 
 </html>

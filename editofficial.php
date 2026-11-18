@@ -1,9 +1,17 @@
 <?php
-include 'connect.php';
+include 'session.php'; // signed-in check + $conn
+require_once __DIR__ . '/includes/org_chart.php';
 
 header('Content-Type: application/json'); // Tell JS to expect JSON
 
+if (!in_array($_SESSION['role'] ?? 'user', ['master', 'admin'], true)) {
+    http_response_code(403);
+    echo json_encode(['success' => false, 'message' => 'You are not allowed to edit officials.']);
+    exit;
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    dms_org_ensure_schema($conn);
     // Collect POST data
     $id = $_POST['id'];
     $position = $_POST['position'];
@@ -89,6 +97,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($stmt->execute()) {
+        // Chart group (sent by the edit modal on files-officials.php).
+        if (isset($_POST['group_id']) && $_POST['group_id'] !== '') {
+            $group_id = (int) $_POST['group_id'];
+            if (dms_org_group_exists($conn, $group_id)) {
+                // Moved to another group: place them at the end of it.
+                $g = $conn->prepare("UPDATE officials SET group_id = ?, sort_order = 1000 WHERE id = ? AND (group_id IS NULL OR group_id <> ?)");
+                $g->bind_param("iii", $group_id, $id, $group_id);
+                $g->execute();
+            }
+        }
         echo json_encode(['success' => true]);
     } else {
         echo json_encode(['success' => false, 'message' => $stmt->error]);

@@ -26,6 +26,9 @@
                 mysqli_stmt_execute($stmt);
 
                 if (mysqli_stmt_affected_rows($stmt) > 0) {
+                    // Additional (scanned) attachments: rows removed, files kept (like the ordinance's own file)
+                    require_once __DIR__ . '/includes/record_attachments.php';
+                    dms_ra_delete_for_record($conn, 'ordinance', $id, false);
                     // Log the deletion
                     $log_sql = "INSERT INTO history_log (action, file_type, file_id, title) 
                                 VALUES ('Deleted', 'Ordinance', ?, ?)";

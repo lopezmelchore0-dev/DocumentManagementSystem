@@ -28,149 +28,57 @@
             
             // Fetch role from session
             $role = isset($_SESSION['role']) ? $_SESSION['role'] : 'user';
+            $canEdit = in_array($role, ['master', 'admin'], true);
+
+            require_once __DIR__ . '/includes/org_chart.php';
+            dms_org_ensure_schema($conn);
+            $org = dms_org_load($conn);
+            $orgGroups = dms_org_groups($conn);
+            $orgPositions = dms_org_known_positions($conn);
+            $orgTerm = dms_org_latest_term($conn);
+            $e = function ($v) { return htmlspecialchars((string) $v, ENT_QUOTES, 'UTF-8'); };
         ?>
 
 <!-- MAIN WRAPPER -->
-<div class="content-body" style="background-color: #f1f9f1">
+<div class="content-body">
     <div class="container-fluid">
-    <!-- Centered Title -->
-        <h3 class="text-center mb-0" style="color: #098209;">Organizational Chart</h3>
-
-        <!-- Button aligned right below title -->
-        <div class="d-flex justify-content-end mb-2 ml-4">
-            <a href="addOfficials.php" class="btn mr-1" style="background-color: #098209; color: white;">
-                + Add Officials
-            </a>
-            <a href="previousTerms.php" class="btn btn-secondary">
-                📅 Publish the Chart
-            </a>
-        </div>
-        
-        <div class="row justify-content-center">
-            <!-- Vice Mayor -->
-          <?php
-              $query = mysqli_query($conn, "SELECT * FROM officials WHERE position = 'Vice-Mayor'");
-
-              if ($query && mysqli_num_rows($query) > 0) {
-                  $row = mysqli_fetch_assoc($query);
-          ?>
-                  <div class="col-md-3 text-center mb-4">
-                    <div class="card" onclick='openModal(<?= json_encode($row) ?>, false)'>
-                        <img src="<?= htmlspecialchars($row['photo_path']) ?>" 
-                            class="card-img-top img-fluid" 
-                            style="object-fit: cover; width: 100%; height: 200px;">
-
-                        <!-- Pabago nalang here ng bg nung card if di bagay yung green ahhahaha -->
-                        <div class="card-body text-white text-center" style="background-color: #098209; padding: 1rem;">
-                            <h3 class="card-title mb-1 fw-bold text-white" style="font-size: 1.1rem;">
-                                <?= htmlspecialchars($row['firstname'] . ' ' . $row['surname']) ?>
-                            </h3>
-                            <p class="card-text mb-0" style="font-size: 0.95rem; opacity: 0.9;">
-                                <?= htmlspecialchars($row['position']) ?>
-                            </p>
-                        </div>  
-                    </div>
-                </div>
-
-          <?php
-              } else {
-                  echo "<p class='text-center text-muted'>No Vice Mayor added yet.</p>";
-              }
-          ?>
-          </div>
-
-        <!-- First row of 4 Councilors -->
-        <div class="row justify-content-center">
-            <?php
-                $query = mysqli_query($conn, "SELECT * FROM officials WHERE position = 'Councilor' LIMIT 4");
-                if ($query && mysqli_num_rows($query) > 0) {
-                    while ($row = mysqli_fetch_assoc($query)):
-            ?>
-                <div class="col-md-3 text-center mb-4">
-                    <div class="card" onclick='openModal(<?= json_encode($row) ?>)' style="cursor: pointer;">
-                        <img src="<?= htmlspecialchars($row['photo_path']) ?>" class="card-img-top" style="height: 200px; object-fit: cover;">
-                        <div class="card-body text-white text-center" style="background-color: #098209; padding: 1rem;">
-                            <h3 class="card-title mb-1 fw-bold text-white" style="font-size: 1.1rem;">
-                                <?= htmlspecialchars($row['firstname'] . ' ' . $row['surname']) ?>
-                            </h3>
-                            <p class="card-text mb-0" style="font-size: 0.95rem; opacity: 0.9;">
-                                <?= htmlspecialchars($row['position']) ?>
-                            </p>
-                        </div>
-                    </div>
-                </div>
-
-            <?php
-                    endwhile;
-                } else {
-                    echo "<p class='text-center text-muted w-100'>No Councilors added yet.</p>";
-                }
-            ?>
+        <div class="dms-page-head">
+            <div>
+                <h1>Organizational Chart</h1>
+                <p>Current Sangguniang Bayan officials. Select an official to see their details<?php echo $canEdit ? '; use Edit chart to change titles, photos, groups and order' : ''; ?>.</p>
+            </div>
+            <!-- Buttons -->
+            <div class="dms-page-actions">
+                <?php if ($canEdit) { ?>
+                    <button type="button" class="btn btn-light" data-org-toggle aria-pressed="false">
+                        <i class="ti-pencil-alt"></i>&nbsp; Edit chart
+                    </button>
+                <?php } ?>
+                <button type="button" class="btn btn-light" data-org-download title="Save the chart as a PNG image">
+                    <i class="ti-download"></i>&nbsp; Download PNG
+                </button>
+                <button type="button" class="btn btn-light" data-org-copy title="Copy the chart image, then paste it into Word or a report">
+                    <i class="ti-clipboard"></i>&nbsp; Copy image
+                </button>
+                <?php if ($canEdit) { ?>
+                    <a href="addOfficials.php" class="btn btn-primary">
+                        <i class="fa fa-plus"></i>&nbsp;Add Officials
+                    </a>
+                    <a href="previousTerms.php" class="btn btn-dark">
+                        <i class="fa fa-calendar"></i>&nbsp;Publish the Chart
+                    </a>
+                <?php } ?>
+            </div>
         </div>
 
-        <!-- Second row of 4 Councilors -->
-        <div class="row justify-content-center">
-            <?php
-                $query = mysqli_query($conn, "SELECT * FROM officials WHERE position = 'Councilor' LIMIT 4 OFFSET 4");
-                if ($query && mysqli_num_rows($query) > 0) {
-                    while ($row = mysqli_fetch_assoc($query)):
-            ?>
-                <div class="col-md-3 text-center mb-4">
-                    <div class="card" onclick='openModal(<?= json_encode($row) ?>)' style="cursor: pointer;">
-                        <img src="<?= htmlspecialchars($row['photo_path']) ?>" class="card-img-top" style="height: 200px; object-fit: cover;">
-                        <div class="card-body text-white text-center" style="background-color: #098209; padding: 1rem;">
-                            <h3 class="card-title mb-1 fw-bold text-white" style="font-size: 1.1rem;">
-                                <?= htmlspecialchars($row['firstname'] . ' ' . $row['surname']) ?>
-                            </h3>
-                            <p class="card-text mb-0" style="font-size: 0.95rem; opacity: 0.9;">
-                                <?= htmlspecialchars($row['position']) ?>
-                            </p>
-                        </div>
-                    </div>
-                </div>
-            <?php
-                    endwhile;
-                } else {
-                    echo "<p class='text-center text-muted w-100'>No additional Councilors added yet.</p>";
-                }
-            ?>
-        </div>
-
-        <!-- LNB and PPSK -->
-        <div class="row justify-content-center">
-            <?php
-                $positions = ['LNB', 'PPSK'];
-                foreach ($positions as $pos):
-                    $query = mysqli_query($conn, "SELECT * FROM officials WHERE position = '$pos'");
-                    if ($query && mysqli_num_rows($query) > 0) {
-                        if ($row = mysqli_fetch_assoc($query)):
-            ?>
-                <div class="col-md-3 text-center mb-4">
-                    <div class="card">
-                        <img src="<?= htmlspecialchars($row['photo_path']) ?>" class="card-img-top" style="height: 200px; object-fit: cover;">
-                        <div class="col-md-3 text-center mb-4">
-                            <div class="card" onclick='openModal(<?= json_encode($row) ?>)' style="cursor: pointer;">
-                                <img src="<?= htmlspecialchars($row['photo_path']) ?>" class="card-img-top" style="height: 200px; object-fit: cover;">
-                                <div class="card-body text-white text-center" style="background-color: #098209; padding: 1rem;">
-                                    <h3 class="card-title mb-1 fw-bold text-white" style="font-size: 1.1rem;">
-                                        <?= htmlspecialchars($row['firstname'] . ' ' . $row['surname']) ?>
-                                    </h3>
-                                    <p class="card-text mb-0" style="font-size: 0.95rem; opacity: 0.9;">
-                                        <?= htmlspecialchars($row['position']) ?>
-                                    </p>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            <?php
-                        endif;
-                    } else {
-                        echo "<p class='text-center text-muted w-100'>No $pos added yet.</p>";
-                    }
-                endforeach;
-            ?>
-
+        <div class="card">
+            <div class="card-body p-0">
+                <?php if ($org['count'] === 0 && !$canEdit) { ?>
+                    <div class="dms-empty"><i class="ti-direction-alt"></i>No officials have been added yet.</div>
+                <?php } else { ?>
+                    <?php echo dms_org_render($org, ['editable' => $canEdit]); ?>
+                <?php } ?>
+            </div>
         </div>
 
 
@@ -215,7 +123,7 @@
                             </div>
 
                                                                 <!-- Buttons -->
-                                                                <div class="mt-auto d-flex justify-content-center gap-2">
+                                                                <div class="mt-auto d-flex justify-content-center gap-2"<?php echo $canEdit ? '' : ' hidden'; ?>>
                                                                     <button type="button" class="btn btn-light btn-sm me-2" onclick="editOfficial(currentOfficialId)">
                                                                         <i class="fa fa-pencil"></i> Edit
                                                                     </button>
@@ -346,10 +254,21 @@
                            <div class="col-sm-9">
                                 <select class="form-control" id="edit_position" name="position" required>
                                     <option value="" disabled selected>Select...</option>
-                                    <option value="Vice-Mayor">Vice-Mayor</option>
-                                    <option value="Councilor">Councilor</option>
-                                    <option value="LNB">LNB</option>
-                                    <option value="PPSK">PPSK</option>
+                                    <?php foreach ($orgPositions as $p) { ?>
+                                        <option value="<?php echo $e($p); ?>"><?php echo $e($p); ?></option>
+                                    <?php } ?>
+                                    <option value="__other">Other (type a position)…</option>
+                                </select>
+                                <input type="text" class="form-control mt-2" id="edit_position_other" maxlength="100" placeholder="e.g. SB Secretary" hidden>
+                            </div>
+                        </div>
+                        <div class="form-group row">
+                            <label class="col-sm-3 col-form-label" style="color: #000000" for="edit_group_id">Chart group:</label>
+                            <div class="col-sm-9">
+                                <select class="form-control" id="edit_group_id">
+                                    <?php foreach ($orgGroups as $g) { ?>
+                                        <option value="<?php echo (int) $g['id']; ?>"><?php echo $e($g['title']); ?></option>
+                                    <?php } ?>
                                 </select>
                             </div>
                         </div>
@@ -402,7 +321,7 @@
 
                         <!-- Education -->
                         <h5 class="border-bottom pb-1 mt-4 mb-2" style="color: #28a745;">Highest Educational Attaintment</h5>
-                        <div class="row text-dark">
+                        <div class="text-dark">
                             <div class="row text-dark">
                                 <div class="col-md-6 mb-2">
                                     <label for="edit_education_attainment" class="form-label"><strong>Degree/Level:</strong></label>
@@ -559,6 +478,28 @@
 
 
     // ********EDIT FUNCTION********
+    // Position: one of the known positions, or "Other" with a typed one.
+    function setEditPosition(value) {
+        const sel = document.getElementById('edit_position');
+        const other = document.getElementById('edit_position_other');
+        const known = Array.from(sel.options).some(o => o.value === value && o.value !== '__other');
+        sel.value = !value ? '' : (known ? value : '__other');
+        other.value = known ? '' : (value || '');
+        other.hidden = sel.value !== '__other';
+    }
+    function getEditPosition() {
+        const sel = document.getElementById('edit_position');
+        return sel.value === '__other' ? document.getElementById('edit_position_other').value.trim() : sel.value;
+    }
+    document.addEventListener('DOMContentLoaded', function () {
+        const sel = document.getElementById('edit_position');
+        const other = document.getElementById('edit_position_other');
+        sel.addEventListener('change', function () {
+            other.hidden = sel.value !== '__other';
+            if (!other.hidden) { other.focus(); }
+        });
+    });
+
     function setInputValue(id, value) {
         const el = document.getElementById(id);
         if (el) {
@@ -575,7 +516,8 @@
             }
 
             // setInputValue('edit_official_id', official.id);
-            setInputValue('edit_position', official.position);
+            setEditPosition(official.position);
+            if (official.group_id) { setInputValue('edit_group_id', official.group_id); }
             setInputValue('edit_yeartermstart', official.term_start);
             setInputValue('edit_yeartermend', official.term_end);
             setInputValue('edit_surname', official.surname);
@@ -670,7 +612,13 @@
 
                     const formData = new FormData();
                     formData.append('id', document.getElementById('edit_official_id').value);
-                    formData.append('position', document.getElementById('edit_position').value);
+                    const position = getEditPosition();
+                    if (!position) {
+                        Swal.fire({ icon: 'warning', title: 'Position required', text: 'Choose or type a position.' });
+                        return;
+                    }
+                    formData.append('position', position);
+                    formData.append('group_id', document.getElementById('edit_group_id').value);
                     formData.append('term_start', document.getElementById('edit_yeartermstart').value);
                     formData.append('term_end', document.getElementById('edit_yeartermend').value);
                     formData.append('surname', document.getElementById('edit_surname').value);
@@ -718,7 +666,7 @@
                             Swal.fire({
                                 icon: 'error',
                                 title: 'Update Failed',
-                                text: response.message || 'An unexpected error occurred.',text: json.message,
+                                text: response.message || 'An unexpected error occurred.',
                                 confirmButtonText: 'OK'
                             });
                         }
@@ -858,17 +806,68 @@
         //}
 </script>
 
-<style>
-    .card {
-        border: 2px solid #098209; /* Green border */
-        cursor: pointer;
-        transition: box-shadow 0.3s ease;
-    }
-    .card:hover {
-        box-shadow: 0 0 15px rgba(9, 130, 9, 0.6); /* Glowing shadow on hover */
-    }
-
-</style>
+<?php if ($canEdit) { ?>
+        <!-- ********QUICK ADD (the "+" slot on the chart)******** -->
+        <div class="modal fade" id="orgQuickAdd" tabindex="-1" aria-labelledby="orgQuickAddLabel" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-centered">
+                <form class="modal-content" novalidate>
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="orgQuickAddLabel">Add an official to the chart</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <label class="d-block text-center mb-3" style="cursor: pointer;">
+                            <span class="dms-org-qa-photo" data-qa-preview><i class="ti-camera"></i></span>
+                            <span class="small text-muted">Photo (JPG, PNG, GIF or WebP) &ndash; optional</span>
+                            <input type="file" name="photo" accept="image/png,image/jpeg,image/gif,image/webp" class="d-none">
+                        </label>
+                        <div class="row g-2">
+                            <div class="col-sm-6">
+                                <label class="form-label" for="qa_firstname">First name</label>
+                                <input type="text" class="form-control" id="qa_firstname" name="firstname" maxlength="100" required>
+                            </div>
+                            <div class="col-sm-6">
+                                <label class="form-label" for="qa_middlename">Middle name</label>
+                                <input type="text" class="form-control" id="qa_middlename" name="middlename" maxlength="100">
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label" for="qa_surname">Surname</label>
+                                <input type="text" class="form-control" id="qa_surname" name="surname" maxlength="100" required>
+                            </div>
+                            <div class="col-sm-6">
+                                <label class="form-label" for="qa_position">Position</label>
+                                <input type="text" class="form-control" id="qa_position" name="position" maxlength="100" list="orgPositionList" placeholder="e.g. Councilor" required>
+                                <datalist id="orgPositionList">
+                                    <?php foreach ($orgPositions as $p) { ?><option value="<?php echo $e($p); ?>"></option><?php } ?>
+                                </datalist>
+                            </div>
+                            <div class="col-sm-6">
+                                <label class="form-label" for="qa_group">Chart group</label>
+                                <select class="form-control" id="qa_group" name="group_id" required>
+                                    <?php foreach ($orgGroups as $g) { ?>
+                                        <option value="<?php echo (int) $g['id']; ?>"><?php echo $e($g['title']); ?></option>
+                                    <?php } ?>
+                                </select>
+                            </div>
+                            <div class="col-sm-6">
+                                <label class="form-label" for="qa_term_start">Term start</label>
+                                <input type="date" class="form-control" id="qa_term_start" name="term_start" data-qa-default="<?php echo $e($orgTerm['start']); ?>">
+                            </div>
+                            <div class="col-sm-6">
+                                <label class="form-label" for="qa_term_end">Term end</label>
+                                <input type="date" class="form-control" id="qa_term_end" name="term_end" data-qa-default="<?php echo $e($orgTerm['end']); ?>">
+                            </div>
+                        </div>
+                        <p class="small text-muted mt-3 mb-0">Only the basics are needed here. Click the official on the chart later to fill in the full personal details.</p>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancel</button>
+                        <button type="submit" class="btn btn-primary"><i class="ti-plus"></i>&nbsp; Add to chart</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+<?php } ?>
 
 
     <!-- Required vendors -->
@@ -876,7 +875,9 @@
     <script src="./js/quixnav-init.js"></script>
     <script src="./js/custom.min.js"></script>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
+    <link href="./css/dms-theme.css?v=<?php echo filemtime(__DIR__ . '/css/dms-theme.css'); ?>" rel="stylesheet" />
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="./js/org-chart.js?v=<?php echo filemtime(__DIR__ . '/js/org-chart.js'); ?>"></script>
 
 
     

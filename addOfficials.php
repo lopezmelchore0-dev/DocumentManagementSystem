@@ -5,28 +5,8 @@
 
 <script>
     document.addEventListener("DOMContentLoaded", function () {
-        const requiredFields = [
-            "position",
-            "term_start",
-            "term_end",
-            "surname",
-            "firstname",
-            "birthday",
-            "birthplace",
-            "address",
-            "mobile_number",
-            "email",
-            "gender",
-            // "civil_status",
-            // "spouse_name",
-            // "spouse_birthday",
-            // "spouse_birthplace",
-            // "dependents",
-            "gsis_number",
-            "pagibig_number",
-            "philhealth_number"
-            // photo_path handled via PHP upload, so not validated here
-        ];
+        // Only what the org chart needs; every other detail can be filled in later.
+        const requiredFields = ["position", "surname", "firstname"];
 
         function validateField(field) {
             let inputElement = document.getElementById(field);
@@ -71,9 +51,25 @@
             }
         });
 
+        // "Other (type a position)" reveals a text box for a custom position.
+        const positionSelect = document.getElementById("position");
+        const positionOther = document.getElementById("position_other");
+        if (positionSelect && positionOther) {
+            positionSelect.addEventListener("change", function () {
+                const other = positionSelect.value === "__other";
+                positionOther.hidden = !other;
+                positionOther.required = other;
+                if (other) { positionOther.focus(); }
+            });
+        }
+
         // Form submit validation
         document.querySelector("form").addEventListener("submit", function (event) {
             let isValid = true;
+            if (positionSelect && positionSelect.value === "__other" && !positionOther.value.trim()) {
+                isValid = false;
+                positionOther.focus();
+            }
             requiredFields.forEach(function (field) {
                 validateField(field);
                 if (!document.getElementById(field).value.trim() || 
@@ -102,13 +98,13 @@
         <!--**********************************
             Content body start
         ***********************************-->
-        <div class="content-body" style="background-color: #f1f9f1">
+        <div class="content-body">
             <div class="container-fluid" >
                 <div class="row d-flex justify-content-center">
-                    <div class="col-xl-8 col-xxl-12 items-center">                        
+                    <div class="col-xl-8 col-xxl-12 items-center dms-form-wrap">                        
                         <div class="card" style="align-self: center;">
-                            <div class="card-header d-flex justify-content-center">
-                                <h4 class="card-title text-center" style="color: #098209;">ADD OFFICIALS</h4>
+                            <div class="card-header">
+                                <div><h4 class="card-title mb-0">Add Officials</h4><p class="dms-card-sub">Fill in the details below, then save.</p></div>
                             </div>
                             <div class="card-body">
                                 <div class="basic-form">
@@ -118,27 +114,38 @@
                                                 include("connect.php");
                                                 error_reporting(0);
 
+                                                require_once __DIR__ . '/includes/org_chart.php';
+                                                dms_org_ensure_schema($conn);
+
                                                 // Collect POST data
                                                 $position = $_POST['position'];
-                                                $term_start = $_POST['term_start'];
-                                                $term_end = $_POST['term_end'];
+                                                if ($position === '__other') { // "Other (type a position)"
+                                                    $position = mb_substr(trim(preg_replace('/\s+/u', ' ', (string) ($_POST['position_other'] ?? ''))), 0, 100);
+                                                }
+                                                // Optional fields: blank becomes NULL (DATE/ENUM columns reject '').
+                                                $nul = function ($v) {
+                                                    $v = trim((string) $v);
+                                                    return $v === '' ? null : $v;
+                                                };
+                                                $term_start = $nul($_POST['term_start'] ?? '');
+                                                $term_end = $nul($_POST['term_end'] ?? '');
                                                 $surname = $_POST['surname'];
                                                 $firstname = $_POST['firstname'];
                                                 $middlename = $_POST['middlename'];
-                                                $birthday = $_POST['birthday'];
+                                                $birthday = $nul($_POST['birthday'] ?? '');
                                                 $birthplace = $_POST['birthplace'];
                                                 $address = $_POST['address'];
                                                 $mobile_number = $_POST['mobile_number'];
                                                 $email = $_POST['email'];
-                                                $gender = $_POST['gender'];
+                                                $gender = $nul($_POST['gender'] ?? '');
 
                                                 $education_attainment = $_POST['education_attainment'];
                                                 $education_school = $_POST['education_school'];
                                                 $education_date = $_POST['education_date'];
 
-                                                $civil_status = $_POST['civil_status'];
+                                                $civil_status = $nul($_POST['civil_status'] ?? '');
                                                 $spouse_name = $_POST['spouse_name'];
-                                                $spouse_birthday = $_POST['spouse_birthday'];
+                                                $spouse_birthday = $nul($_POST['spouse_birthday'] ?? '');
                                                 $spouse_birthplace = $_POST['spouse_birthplace'];
 
                                                 $dependents = $_POST['dependents'];
@@ -185,12 +192,23 @@
                                                     $dependents, $gsis_number, $pagibig_number, $philhealth_number, $photo_path);
 
                                                 if ($stmt->execute()) {
+                                                    // Chart group: the one picked, otherwise where this position already sits.
+                                                    $newId = (int) $conn->insert_id;
+                                                    $group_id = (int) ($_POST['group_id'] ?? 0);
+                                                    if (!$group_id || !dms_org_group_exists($conn, $group_id)) {
+                                                        $group_id = dms_org_default_group($conn, $position);
+                                                    }
+                                                    if ($group_id) {
+                                                        $g = $conn->prepare("UPDATE officials SET group_id = ?, sort_order = 1000 WHERE id = ?");
+                                                        $g->bind_param("ii", $group_id, $newId);
+                                                        $g->execute();
+                                                    }
                                                     echo "<script>
                                                             Swal.fire({
                                                                 icon: 'success',
                                                                 title: 'Official Added',
                                                                 text: 'The official has been successfully added.'
-                                                            }).then(() => { window.location.href = 'files-officials.php'; });
+                                                            }).then(() => { DmsNav.returnTo('files-officials.php'); });
                                                         </script>";
                                                 } else {
                                                     echo "<script>
@@ -204,7 +222,7 @@
                                                 }
 
                                                 $stmt->close();
-                                                $conn->close();
+                                                // $conn stays open: the position limits below still query it.
                                             }
                                         ?>
 
@@ -213,7 +231,7 @@
                                         <!-- BASIC INFORMATION-->
                                         <div class="form-group row">
                                             <div class="col-sm-12">
-                                                <h5 style="color: #098209; font-weight: bold;">Basic Information</h5>
+                                                <h5 style="font-weight: bold;">Basic Information</h5>
                                             </div>
                                         </div>
                                         <?php
@@ -229,9 +247,15 @@
                                             $res = $stmt->get_result()->fetch_assoc();
                                             $current[$pos] = $res['count'];
                                         }
+
+                                        // Chart groups and custom positions already in use (includes/org_chart.php)
+                                        require_once __DIR__ . '/includes/org_chart.php';
+                                        dms_org_ensure_schema($conn);
+                                        $orgGroups = dms_org_groups($conn);
+                                        $orgCustomPositions = array_values(array_diff(dms_org_known_positions($conn), $positions));
                                         ?>
                                         <div class="form-group row">
-                                            <label class="col-sm-3 col-form-label" style="color: #000000">Position:</label>
+                                            <label class="col-sm-3 col-form-label">Position:</label>
                                             <div class="col-sm-9">
                                                 <select class="form-control" id="position" name="position" required>
                                                     <option value="" selected>Choose...</option>
@@ -239,83 +263,100 @@
                                                     <option value="Councilor" <?= $current['Councilor'] >= $limits['Councilor'] ? 'disabled' : '' ?>>Councilor</option>
                                                     <option value="LNB" <?= $current['LNB'] >= $limits['LNB'] ? 'disabled' : '' ?>>LNB</option>
                                                     <option value="PPSK" <?= $current['PPSK'] >= $limits['PPSK'] ? 'disabled' : '' ?>>PPSK</option>
+                                                    <?php foreach ($orgCustomPositions as $p) { ?>
+                                                        <option value="<?= htmlspecialchars($p) ?>"><?= htmlspecialchars($p) ?></option>
+                                                    <?php } ?>
+                                                    <option value="__other">Other (type a position)…</option>
+                                                </select>
+                                                <input type="text" class="form-control mt-2" id="position_other" name="position_other" maxlength="100" placeholder="e.g. SB Secretary" hidden>
+                                            </div>
+                                        </div>
+
+                                        <div class="form-group row">
+                                            <label class="col-sm-3 col-form-label" for="group_id">Chart group:</label>
+                                            <div class="col-sm-9">
+                                                <select class="form-control" id="group_id" name="group_id">
+                                                    <option value="">Automatic (by position)</option>
+                                                    <?php foreach ($orgGroups as $g) { ?>
+                                                        <option value="<?= (int) $g['id'] ?>"><?= htmlspecialchars($g['title']) ?></option>
+                                                    <?php } ?>
                                                 </select>
                                             </div>
                                         </div>
 
                                         <div class="form-group row">
-                                            <label class="col-sm-3 col-form-label" style="color: #000000">Term Start:</label>
+                                            <label class="col-sm-3 col-form-label">Term Start:</label>
                                             <div class="col-sm-9">
-                                                <input type="date" class="form-control" id="term_start" name="term_start" min="1900" max="2100" required>
+                                                <input type="date" class="form-control" id="term_start" name="term_start" min="1900" max="2100">
                                             </div>
                                         </div>
 
                                         <div class="form-group row">
-                                            <label class="col-sm-3 col-form-label" style="color: #000000">Term End:</label>
+                                            <label class="col-sm-3 col-form-label">Term End:</label>
                                             <div class="col-sm-9">
-                                                <input type="date" class="form-control" id="term_end" name="term_end" min="1900" max="2100" required>
+                                                <input type="date" class="form-control" id="term_end" name="term_end" min="1900" max="2100">
                                             </div>
                                         </div>
                                         <div class="form-group row">
-                                            <label class="col-sm-3 col-form-label" style="color: #000000">Surname:</label>
+                                            <label class="col-sm-3 col-form-label">Surname:</label>
                                             <div class="col-sm-9">
                                                 <input type="text" class="form-control" id="surname" name="surname" required placeholder="Enter surname">
                                             </div>
                                         </div>
 
                                         <div class="form-group row">
-                                            <label class="col-sm-3 col-form-label" style="color: #000000">First Name:</label>
+                                            <label class="col-sm-3 col-form-label">First Name:</label>
                                             <div class="col-sm-9">
                                                 <input type="text" class="form-control" id="firstname" name="firstname" required placeholder="Enter first name">
                                             </div>
                                         </div>
 
                                         <div class="form-group row">
-                                            <label class="col-sm-3 col-form-label" style="color: #000000">Middle Name:</label>
+                                            <label class="col-sm-3 col-form-label">Middle Name:</label>
                                             <div class="col-sm-9">
                                                 <input type="text" class="form-control" id="middlename" name="middlename" placeholder="Enter middle name (optional)">
                                             </div>
                                         </div>
 
                                         <div class="form-group row">
-                                            <label class="col-sm-3 col-form-label" style="color: #000000">Birthday:</label>
+                                            <label class="col-sm-3 col-form-label">Birthday:</label>
                                             <div class="col-sm-9">
-                                                <input type="date" class="form-control" id="birthday" name="birthday" required>
+                                                <input type="date" class="form-control" id="birthday" name="birthday">
                                             </div>
                                         </div>
 
                                         <div class="form-group row">
-                                            <label class="col-sm-3 col-form-label" style="color: #000000">Birthplace:</label>
+                                            <label class="col-sm-3 col-form-label">Birthplace:</label>
                                             <div class="col-sm-9">
-                                                <input type="text" class="form-control" id="birthplace" name="birthplace" required placeholder="Enter birthplace">
+                                                <input type="text" class="form-control" id="birthplace" name="birthplace" placeholder="Enter birthplace">
                                             </div>
                                         </div>
 
                                         <div class="form-group row">
-                                            <label class="col-sm-3 col-form-label" style="color: #000000">Address:</label>
+                                            <label class="col-sm-3 col-form-label">Address:</label>
                                             <div class="col-sm-9">
-                                                <textarea class="form-control" id="address" name="address" rows="2" required placeholder="Enter address"></textarea>
+                                                <textarea class="form-control" id="address" name="address" rows="2" placeholder="Enter address"></textarea>
                                             </div>
                                         </div>
 
                                         <div class="form-group row">
-                                            <label class="col-sm-3 col-form-label" style="color: #000000">Mobile Number:</label>
+                                            <label class="col-sm-3 col-form-label">Mobile Number:</label>
                                             <div class="col-sm-9">
-                                                <input type="tel" class="form-control" id="mobile_number" name="mobile_number" required placeholder="Enter mobile number">
+                                                <input type="tel" class="form-control" id="mobile_number" name="mobile_number" placeholder="Enter mobile number">
                                             </div>
                                         </div>
 
                                         <div class="form-group row">
-                                            <label class="col-sm-3 col-form-label" style="color: #000000">Email:</label>
+                                            <label class="col-sm-3 col-form-label">Email:</label>
                                             <div class="col-sm-9">
-                                                <input type="email" class="form-control" id="email" name="email" required placeholder="Enter email address">
+                                                <input type="email" class="form-control" id="email" name="email" placeholder="Enter email address">
                                             </div>
                                         </div>
 
                                         <div class="form-group row">
-                                            <label class="col-sm-3 col-form-label" style="color: #000000">Gender:</label>
+                                            <label class="col-sm-3 col-form-label">Gender:</label>
                                             <div class="col-sm-9">
-                                                <select class="form-control" id="gender" name="gender" required>
+                                                <select class="form-control" id="gender" name="gender">
                                                     <option value="" selected>Choose...</option>
                                                     <option value="Male">Male</option>
                                                     <option value="Female">Female</option>
@@ -329,25 +370,25 @@
                                          <!-- EDUCATIONAL BACKGROUND-->
                                         <div class="form-group row">
                                             <div class="col-sm-12">
-                                                <h5 style="color: #098209; font-weight: bold;">Educational Background</h5>
+                                                <h5 style="font-weight: bold;">Educational Background</h5>
                                             </div>
                                         </div>
                                         <div class="form-group row">
-                                            <label class="col-sm-3 col-form-label" style="color: #000000">Highest Education Attainment:</label>
+                                            <label class="col-sm-3 col-form-label">Highest Education Attainment:</label>
                                             <div class="col-sm-9">
                                                 <input type="text" class="form-control" id="education_attainment" name="education_attainment" placeholder="e.g. Bachelor's Degree">
                                             </div>
                                         </div>
 
                                         <div class="form-group row">
-                                            <label class="col-sm-3 col-form-label" style="color: #000000">School:</label>
+                                            <label class="col-sm-3 col-form-label">School:</label>
                                             <div class="col-sm-9">
                                                 <input type="text" class="form-control" id="education_school" name="education_school" placeholder="Enter school name">
                                             </div>
                                         </div>
 
                                         <div class="form-group row">
-                                            <label class="col-sm-3 col-form-label" style="color: #000000">Inclusive Dates:</label>
+                                            <label class="col-sm-3 col-form-label">Inclusive Dates:</label>
                                             <div class="col-sm-9">
                                                 <input type="text" class="form-control" id="education_date" name="education_date" placeholder="e.g. June 2020">
                                             </div>
@@ -359,13 +400,13 @@
                                          <!-- CIVIL STATUS INFORMATION -->
                                         <div class="form-group row">
                                             <div class="col-sm-12">
-                                                <h5 style="color: #098209; font-weight: bold;">Civil Status</h5>
+                                                <h5 style="font-weight: bold;">Civil Status</h5>
                                             </div>
                                         </div>
                                         <div class="form-group row">
-                                            <label class="col-sm-3 col-form-label" style="color: #000000">Civil Status:</label>
+                                            <label class="col-sm-3 col-form-label">Civil Status:</label>
                                             <div class="col-sm-9">
-                                                <select class="form-control" id="civil_status" name="civil_status" required>
+                                                <select class="form-control" id="civil_status" name="civil_status">
                                                     <option value="" selected>Choose...</option>
                                                     <option value="Single">Single</option>
                                                     <option value="Married">Married</option>
@@ -376,21 +417,21 @@
                                         </div>
 
                                         <div class="form-group row">
-                                            <label class="col-sm-3 col-form-label" style="color: #000000">Spouse Name:</label>
+                                            <label class="col-sm-3 col-form-label">Spouse Name:</label>
                                             <div class="col-sm-9">
                                                 <input type="text" class="form-control" id="spouse_name" name="spouse_name" placeholder="Enter spouse name if applicable">
                                             </div>
                                         </div>
 
                                         <div class="form-group row">
-                                            <label class="col-sm-3 col-form-label" style="color: #000000">Spouse Birthday:</label>
+                                            <label class="col-sm-3 col-form-label">Spouse Birthday:</label>
                                             <div class="col-sm-9">
                                                 <input type="date" class="form-control" id="spouse_birthday" name="spouse_birthday">
                                             </div>
                                         </div>
 
                                         <div class="form-group row">
-                                            <label class="col-sm-3 col-form-label" style="color: #000000">Spouse Birthplace:</label>
+                                            <label class="col-sm-3 col-form-label">Spouse Birthplace:</label>
                                             <div class="col-sm-9">
                                                 <input type="text" class="form-control" id="spouse_birthplace" name="spouse_birthplace" placeholder="Enter spouse birthplace">
                                             </div>
@@ -401,32 +442,32 @@
                                         <!-- PERSONAL INFORMATION -->
                                         <div class="form-group row">
                                             <div class="col-sm-12">
-                                                <h5 style="color: #098209; font-weight: bold;">Personal Information</h5>
+                                                <h5 style="font-weight: bold;">Personal Information</h5>
                                             </div>
                                         </div>
                                         <div class="form-group row">
-                                            <label class="col-sm-3 col-form-label" style="color: #000000">Dependents:</label>
+                                            <label class="col-sm-3 col-form-label">Dependents:</label>
                                             <div class="col-sm-9">
                                                 <textarea class="form-control" id="dependents" name="dependents" rows="2" placeholder="List dependents"></textarea>
                                             </div>
                                         </div>
 
                                         <div class="form-group row">
-                                            <label class="col-sm-3 col-form-label" style="color: #000000">GSIS Number:</label>
+                                            <label class="col-sm-3 col-form-label">GSIS Number:</label>
                                             <div class="col-sm-9">
                                                 <input type="text" class="form-control" id="gsis_number" name="gsis_number" placeholder="Enter GSIS number">
                                             </div>
                                         </div>
 
                                         <div class="form-group row">
-                                            <label class="col-sm-3 col-form-label" style="color: #000000">Pag-IBIG Number:</label>
+                                            <label class="col-sm-3 col-form-label">Pag-IBIG Number:</label>
                                             <div class="col-sm-9">
                                                 <input type="text" class="form-control" id="pagibig_number" name="pagibig_number" placeholder="Enter Pag-IBIG number">
                                             </div>
                                         </div>
 
                                         <div class="form-group row">
-                                            <label class="col-sm-3 col-form-label" style="color: #000000">PhilHealth Number:</label>
+                                            <label class="col-sm-3 col-form-label">PhilHealth Number:</label>
                                             <div class="col-sm-9">
                                                 <input type="text" class="form-control" id="philhealth_number" name="philhealth_number" placeholder="Enter PhilHealth number">
                                             </div>
@@ -436,12 +477,12 @@
 
                                         <div class="input-group mb-3">
                                             <div class="input-group-prepend">
-                                                <span class="input-group-text" style="background-color: #098209;">
+                                                <span class="input-group-text">
                                                     <i class="fa fa-paperclip"></i>
                                                 </span>
                                             </div>
                                             <div class="custom-file">
-                                                <input type="file" class="custom-file-input" id="photo" name="photo" accept="image/*" onchange="updateFileName(this)" required>
+                                                <input type="file" class="custom-file-input" id="photo" name="photo" accept="image/*" onchange="updateFileName(this)">
                                                 <label class="custom-file-label text-truncate" for="photo" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:block;">Choose image</label>
                                             </div>
                                             <div class="input-group-append">
@@ -449,9 +490,9 @@
                                             </div>
                                         </div>
 
-                                        <div class="form-group row d-flex justify-content-center">
-                                            <button type="submit" class="btn btn-primary" id="save_btn" name="save" value="Save Data" style="background-color: #098209; border: none; width: 100px; color: #FFFFFF;">Save</button>
-                                            <a href="#" class="btn btn-danger ml-2" id="cancel_btn" name="cancel" value="Cancel" data-href="files-officials.php" style="background-color: red; border: none; width: 100px; color: #FFFFFF;">Cancel</a>
+                                        <div class="form-group row d-flex justify-content-center dms-form-actions">
+                                            <button type="submit" class="btn btn-primary" id="save_btn" name="save" value="Save Data">Save</button>
+                                            <a href="#" class="btn btn-light" id="cancel_btn" name="cancel" value="Cancel" data-href="files-officials.php">Cancel</a>
                                         </div>
                                     </form>
                                 </div>
@@ -511,7 +552,7 @@
     });
 
     function removeFile() {
-        const fileInput = document.getElementById("attachment");
+        const fileInput = document.getElementById("photo");
         const fileLabel = fileInput.nextElementSibling;
 
         fileInput.value = ""; // Clear file input
@@ -520,11 +561,7 @@
 
     document.addEventListener("DOMContentLoaded", function () {
         const form = document.querySelector("form");
-        const requiredFields = [
-            "position", "surname", "firstname", "birthday", "birthplace",
-            "address", "mobile_number", "email", "gender",
-            "gsis_number", "pagibig_number", "philhealth_number"
-        ];
+        const requiredFields = ["position", "surname", "firstname"];
 
         function validateField(field) {
             const inputElement = document.getElementById(field);
@@ -614,7 +651,7 @@
                 confirmButtonText: 'Yes, cancel it!'
             }).then((result) => {
                 if (result.isConfirmed) {
-                    window.location.href = redirectUrl;
+                    DmsNav.returnTo(redirectUrl);
                 }
             });
         });

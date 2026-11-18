@@ -2,9 +2,15 @@
     include("session.php");
     include("connect.php");
 
+    $loginSuccess = false;
+    $loginFlash = null;     // result of a failed sign-in, shown after the redirect below
+    $loginUsername = '';    // typed username, kept when the sign-in fails
+
     if ($_SERVER['REQUEST_METHOD'] == 'POST') {
-        $email = htmlspecialchars(trim($_POST['email']));
-        $password = htmlspecialchars(trim($_POST['password']));
+        $rawUsername = trim((string) ($_POST['email'] ?? ''));
+        $email = htmlspecialchars($rawUsername);
+        $password = htmlspecialchars(trim((string) ($_POST['password'] ?? '')));
+        $fail = null; // [icon, title, text, field to focus]
 
         $query = $conn->prepare("SELECT * FROM accounts WHERE email = ?");
         $query->bind_param("s", $email);
@@ -16,75 +22,47 @@
 
             if (password_verify($password, $user['password'])) {
                 if ($user['account_status'] === 'active') {
+                    session_regenerate_id(true);
                     $_SESSION['email'] = $user['email'];
                     $_SESSION['user_id'] = $user['id'];
                     $_SESSION['role'] = $user['role'];
 
-                    // Generate Token
-                    $token = bin2hex(random_bytes(32));
-                    $_SESSION['token'] = $token;
+                    // A token for this device only: other devices signed in to the same account stay signed in
+                    $_SESSION['token'] = dms_auth_create($conn, $user['id']);
 
-                    // Save Token in Database
-                    $updateToken = $conn->prepare("UPDATE accounts SET token=? WHERE id=?");
-                    $updateToken->bind_param("si", $token, $user['id']);
-                    $updateToken->execute();
-
-                    echo "<script>
-                            document.addEventListener('DOMContentLoaded', function() {
-                                Swal.fire({
-                                    icon: 'success',
-                                    title: 'Login Successful',
-                                    showConfirmButton: false,
-                                    text: 'You have been logged in successfully.',
-                                    timer: 2000
-                                }).then(() => {
-                                    window.location.href = 'dashboard.php';
-                                });
-                            });
-                        </script>";
+                    // No popup: the page plays a short exit transition, then opens the dashboard
+                    $loginSuccess = true;
+                } elseif ($user['account_status'] === 'pending') {
+                    $fail = ['info', 'Account Pending Approval', 'Your registration is awaiting approval by the Sangguniang Bayan Secretary. Please try again once it has been approved.', null];
                 } else {
-                    echo "<script>
-                            document.addEventListener('DOMContentLoaded', function() {
-                                Swal.fire({
-                                    icon: 'warning',
-                                    title: 'Account Inactive',
-                                    text: 'Your account is not active. Please contact the administrator.',
-                                    confirmButtonText: 'OK'
-                                }).then(() => {
-                                    window.location.href = 'login.php';
-                                });
-                            });
-                        </script>";
+                    $fail = ['warning', 'Account Inactive', 'Your account is not active. Please contact the administrator.', null];
                 }
             } else {
-                echo "<script>
-                        document.addEventListener('DOMContentLoaded', function() {
-                            Swal.fire({
-                                icon: 'error',
-                                title: 'Invalid Login',
-                                text: 'Invalid credentials. Please try again.',
-                                confirmButtonText: 'OK'
-                            }).then(() => {
-                                window.location.href = 'login.php';
-                            });
-                        });
-                    </script>";
+                $fail = ['error', 'Invalid Login', 'Invalid credentials. Please try again.', 'password'];
             }
         } else {
-            echo "<script>
-                    document.addEventListener('DOMContentLoaded', function() {
-                        Swal.fire({
-                            icon: 'error',
-                            title: 'Invalid Login',
-                            text: 'User not found. Please try again.',
-                            confirmButtonText: 'OK'
-                        }).then(() => {
-                            window.location.href = 'login.php';
-                        });
-                    });
-                </script>";
+            $fail = ['error', 'Invalid Login', 'User not found. Please try again.', 'email'];
         }
+
+        // Post/Redirect/Get: refreshing the page never re-sends the password, and the
+        // typed username is put back in the form.
+        if ($fail !== null) {
+            $_SESSION['login_flash'] = [
+                'icon' => $fail[0], 'title' => $fail[1], 'text' => $fail[2], 'field' => $fail[3],
+                'username' => $rawUsername,
+            ];
+            header("Location: login.php");
+            exit();
+        }
+    } elseif (isset($_SESSION['login_flash'])) {
+        $loginFlash = $_SESSION['login_flash'];
+        unset($_SESSION['login_flash']);
+        $loginUsername = (string) ($loginFlash['username'] ?? '');
+        unset($loginFlash['username']);
     }
+
+    $dmsAuthPage = true;
+    $dmsPageTitle = 'Log In';
 ?>
 
 
@@ -93,56 +71,64 @@
 
 <?php include "header.php"; ?>
 
-<body class="h-100" style="background: url('./images/loginBG.png') no-repeat center center fixed; background-size: cover;">
-    <div class="authincation h-100">
-        <div class="container-fluid h-100">
-            <div class="row justify-content-center h-100 align-items-center">
-                <!--TEXT LEFT-->
-                <div class="col-md-3 mr-5">
-                    <div class="col-xl-12">
-                        <img src="./images/logo.png" alt="Welcome Image" class="img-fluid d-block mx-auto" style="width: 50%; height: auto;">
-                        <h1 class="text-center mt-4" style="color:#000000; font-weight: bold;">WELCOME<h1>
-                        <h3 class="text-center mt-2" style="color:#000000;">Sangguniang Bayan Office</h3>
-                        <h4 class="text-center mt-2" style="color:#000000;">Document Management System</h4>
+<body class="dms-auth-page<?php echo $loginSuccess ? ' dms-auth-leaving' : ''; ?>">
+    <?php if ($_SERVER['REQUEST_METHOD'] !== 'POST' && $loginFlash === null) include __DIR__ . '/includes/splash.php'; ?>
+    <div class="dms-auth">
+        <!-- Background decorations (purely visual) -->
+        <span class="dms-auth-blob b1" aria-hidden="true"></span>
+        <span class="dms-auth-blob b2" aria-hidden="true"></span>
+        <svg class="dms-auth-wave" viewBox="0 0 1440 220" preserveAspectRatio="none" aria-hidden="true">
+            <path d="M0,140 C240,60 480,200 760,150 C1040,100 1220,40 1440,90 L1440,220 L0,220 Z" fill="rgba(9,130,9,0.07)"/>
+            <path d="M0,180 C300,120 560,220 860,185 C1120,155 1280,120 1440,150 L1440,220 L0,220 Z" fill="rgba(9,130,9,0.06)"/>
+        </svg>
+
+        <div class="dms-auth-shell">
+            <!--TEXT LEFT-->
+            <div class="dms-auth-brand">
+                <img class="dms-auth-building" src="./images/municipal-building.jpg" alt="" aria-hidden="true" width="628" height="318" decoding="async">
+                <span class="dms-auth-building-tint" aria-hidden="true"></span>
+                <div class="dms-auth-brand-top">
+                    <img class="dms-auth-logo" src="./images/logo.png" alt="Sangguniang Bayan seal">
+                    <div class="dms-auth-titles">
+                        <h1>Welcome</h1>
+                        <h3>Sangguniang Bayan Office</h3>
+                        <h4>Document Management System</h4>
                     </div>
                 </div>
-                <!--TEXT RIGHT-->
-                <div class="col-md-3 ml-5">
-                    <div class="authincation-content">
-                        <div class="row no-gutters">
-                            <div class="col-xl-12">
-                                <div class="auth-form">
-                                    <h1 class="text-center" style="color:#098209">Log in</h1>
-                                    <h4 class="text-center mb-4" style="color:#000000">Sign in your account</h4>
-                                    <form id="loginForm" action="<?php echo htmlspecialchars($_SERVER["PHP_SELF"]); ?>" method="post">
-                                        <!--Email-->
-                                        <div class="form-group">
-                                            <input type="text" class="form-control" placeholder="Username" name="email" id="email">
-                                        </div>
-                                        <!-- Password -->
-                                        <div class="form-group" style="position: relative; display: flex; align-items: center;">
-                                            <input type="password" class="form-control" placeholder="Password" name="password" id="password"
-                                                style="padding-right: 35px; width: 100%;">
-                                            <i class="fa fa-eye-slash" id="toggleEye" onclick="togglePassword()" 
-                                                style="position: absolute; right: 10px; font-size: 18px; cursor: pointer; color: #098209;"></i>
-                                        </div>
-                                        <div class="form-row d-flex justify-content-between mt-4 mb-2">
-                                            <div class="form-group">
-                                                <div class="form-check ml-2">
-                                                </div>
-                                            </div>
-                                            <div class="form-group">
-                                            </div>
-                                        </div>
-                                        <div class="text-center">
-                                            <button type="submit" class="btn btn-primary btn-block" style="background-color: #098209; border-color:#098209;">Sign me in</button>
-                                        </div>
-                                    </form> 
-                                </div>
-                            </div>
+                <small>Resolutions · Ordinances · Order of Business · Committee Reports</small>
+            </div>
+            <!--TEXT RIGHT-->
+            <div class="dms-auth-form" role="main">
+                <h2>Log In</h2>
+                <p class="lead-sub">Sign in to your account</p>
+                <form id="loginForm" action="<?php echo htmlspecialchars($_SERVER["PHP_SELF"]); ?>" method="post" novalidate
+                      data-auth-form data-auth-autofocus>
+                    <!--Email-->
+                    <div class="form-group">
+                        <label for="email">Username</label>
+                        <div class="dms-input-icon">
+                            <i class="fa fa-user dms-input-lead" aria-hidden="true"></i>
+                            <input type="text" class="form-control" placeholder="Username" name="email" id="email"
+                                   value="<?php echo htmlspecialchars($loginUsername); ?>" required maxlength="255"
+                                   autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" enterkeyhint="next">
                         </div>
                     </div>
-                </div>
+                    <!-- Password -->
+                    <div class="form-group">
+                        <label for="password">Password</label>
+                        <div class="dms-pw-wrap dms-input-icon">
+                            <i class="fa fa-lock dms-input-lead" aria-hidden="true"></i>
+                            <input type="password" class="form-control" placeholder="Password" name="password" id="password"
+                                   required autocomplete="current-password" enterkeyhint="go">
+                            <i class="fa fa-eye-slash dms-pw-toggle" id="toggleEye" data-pw-toggle="password"></i>
+                        </div>
+                    </div>
+                    <p class="dms-auth-forgot"><a href="forgot_password.php">Forgot password?</a></p>
+                    <div class="mt-4">
+                        <button type="submit" class="btn btn-primary btn-block dms-auth-btn">Sign me in</button>
+                    </div>
+                    <p class="dms-auth-switch">Don't Have an Account? <a href="register.php">Sign Up</a></p>
+                </form>
             </div>
         </div>
     </div>
@@ -157,23 +143,33 @@
     <script src="./js/custom.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 
+    <!-- Password eye, Enter = next field, busy button, keyboard handling (shared by the sign-in forms) -->
+    <script src="./js/auth-forms.js?v=<?php echo filemtime(__DIR__ . '/js/auth-forms.js'); ?>"></script>
+
     <script>
-        function togglePassword() {
-            var passwordInput = document.getElementById("password");
-            var eyeIcon = document.getElementById("toggleEye");
-            
-            if (passwordInput.type === "password") {
-                passwordInput.type = "text";
-                eyeIcon.classList.remove("fa-eye-slash");
-                eyeIcon.classList.add("fa-eye"); // Revert to normal eye icon
-                
-            } else {
-                passwordInput.type = "password";
-                eyeIcon.classList.remove("fa-eye");
-                eyeIcon.classList.add("fa-eye-slash"); // Change icon to indicate visibility
-            }
-        }
+        // Client-side check (the server checks the credentials)
+        DmsAuth.form('loginForm', function () {
+            var username = document.getElementById('email');
+            var password = document.getElementById('password');
+            if (!username.value.trim()) return ['email', 'Invalid Login', 'Please enter your username and password.'];
+            if (!password.value.trim()) return ['password', 'Invalid Login', 'Please enter your username and password.'];
+            return null;
+        });
+
+        <?php if ($loginFlash !== null) { ?>
+        DmsAuth.alert(<?php echo json_encode($loginFlash, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>);
+        <?php } ?>
     </script>
+
+    <?php if ($loginSuccess): ?>
+    <noscript><meta http-equiv="refresh" content="0;url=dashboard.php"></noscript>
+    <script>
+        (function () {
+            var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+            setTimeout(function () { window.location.replace('dashboard.php'); }, reduce ? 0 : 450);
+        })();
+    </script>
+    <?php endif; ?>
 
 </body>
 

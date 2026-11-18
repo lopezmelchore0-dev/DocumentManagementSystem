@@ -1,0 +1,14 @@
+{
+  "name": "dms-document-scanner-tests",
+  "private": true,
+  "description": "Unit and browser tests for the built-in document scanner (js/scanner, js/doc-scanner.js). Not needed to run the DMS.",
+  "scripts": {
+    "test": "node --test \"tests/scanner/*.test.js\"",
+    "fixtures": "node tests/scanner/make-fixtures.js",
+    "test:browser": "node tests/scanner/browser-smoke.js"
+  },
+  "devDependencies": {
+    "jpeg-js": "0.4.4",
+    "pngjs": "7.0.0"
+  }
+}

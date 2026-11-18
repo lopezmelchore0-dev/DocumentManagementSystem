@@ -33,98 +33,119 @@
         <!--**********************************
             Content body start
         ***********************************-->
-        <div class="content-body" style="color: #098209; background-color: #f1f9f1;">
+        <div class="content-body">
             <div class="container-fluid">
+                <?php
+                    require_once "includes/history_timeline.php"; // Table / Timeline switch (top of the card)
+                    require_once "includes/report_data.php"; // dms_report_row_key() for the rows; printing/exporting is in the Reports popup (sidebar)
+                    require_once "includes/minutes_workflow.php"; // sections, statuses, pills, details
+
+                    include "connect.php";
+                    dms_ob_ensure_schema($conn);
+                    $canEdit = ($role === 'admin' || $role === 'master');
+                    // Attachment columns are blobs: only short values (file paths) are loaded here.
+                    $sql = "SELECT id, no_regSession, date, resNo, title, status,
+                                   IF(LENGTH(genAttachment) > 1000, '', genAttachment) AS genAttachment, LENGTH(genAttachment) > 1000 AS genAttachment_stored,
+                                   IF(LENGTH(attachment) > 1000, '', attachment) AS attachment, LENGTH(attachment) > 1000 AS attachment_stored, returnNo, resolutionNo, returnDate, resolutionDate,
+                                   ob_action, reading, referral_office, referral_notes, action_updated_at, ob_status, status_updated_at
+                            FROM minutes ORDER BY date DESC, CAST(SUBSTRING_INDEX(resNo, '.', 1) AS UNSIGNED) DESC, CAST(SUBSTRING_INDEX(resNo, '.', -1) AS UNSIGNED) DESC";
+                    $stmt = $conn->prepare($sql);
+                    if (!$stmt) {
+                        die("SQL Error: " . $conn->error);
+                    }
+                    $stmt->execute();
+                    $result = $stmt->get_result();
+
+                    if (!$result) {
+                        die("SQL Error: " . $conn->error);
+                    }
+
+                    // Fetched once: the tabs, the table and the history timeline all render from $rows.
+                    $rows = $result->fetch_all(MYSQLI_ASSOC);
+                    $schedules = dms_ob_load_schedules($conn);
+
+                    $sectionCounts = array_fill_keys(dms_ob_sections(), 0);
+                    foreach ($rows as $row) {
+                        $sectionCounts[dms_ob_section($row)]++;
+                    }
+                ?>
                 <!-- row -->
                 <div class="row">
                     <div class="col-12">
                         <div class="card">
-                            <div class="card-header d-flex justify-content-between align-items-center p-3 mt-4">
-                                <h1 class="card-title flex-grow-1 fs-4 fw-bold text-dark text-center" style="color: #000000">ORDER OF BUSINESS</h1>
-                                <div class="button-container d-flex justify-content-end">
-                                    <?php if ($role === 'admin' || $role === 'master') { ?>
-                                        <a href="addmeetingminutes.php">
-                                            <button type="button" class="btn btn-primary" style="background-color: #098209; color:#FFFFFF; border: none;"><i class="fa fa-plus"></i>&nbsp;New Agenda</button>
-                                        </a>
+                            <div class="card-body dms-ht-host">
+                                <div class="dms-card-tools"><?php dms_history_toggle(); ?></div>
+                                <!-- Sections: filter the table (and timeline) by First / Second / Third Reading or Other Matters -->
+                                <div class="dms-ob-tabs" role="group" aria-label="Filter by section" data-ob-tabs>
+                                    <button type="button" data-ob-tab="" class="is-active" aria-pressed="true">All <span class="dms-ob-count"><?php echo count($rows); ?></span></button>
+                                    <?php foreach ($sectionCounts as $sectionName => $sectionCount) { ?>
+                                        <button type="button" data-ob-tab="<?php echo htmlspecialchars($sectionName); ?>" aria-pressed="false">
+                                            <?php echo htmlspecialchars($sectionName); ?> <span class="dms-ob-count" data-ob-count="<?php echo htmlspecialchars($sectionName); ?>"><?php echo (int) $sectionCount; ?></span>
+                                        </button>
                                     <?php } ?>
-                                    
                                 </div>
-                            </div>
-                            <div class="card-body">
+                                <div class="dms-ob-selectbar" data-ob-selectbar>
+                                        <p class="dms-ob-help" data-ob-help-idle><i class="fa fa-mouse-pointer" aria-hidden="true"></i> <span class="dms-fine-only">Click an agenda item to view its details<?php echo $canEdit ? '; right-click it to set its status, or use Select to work on several items at once' : ''; ?>.</span><span class="dms-touch-only">Tap an agenda item to view its details<?php echo $canEdit ? '; press and hold it to set its status, or use Select to work on several items at once' : ''; ?>.</span></p>
+                                        <?php if ($canEdit) { ?>
+                                            <p class="dms-ob-help" data-ob-help-selecting hidden><i class="fa fa-check-square-o" aria-hidden="true"></i> <span class="dms-fine-only">Click items to select them (Shift+click selects a range), then right-click a selected item for actions.</span><span class="dms-touch-only">Tap items to select them, then press and hold a selected item or use Actions.</span></p>
+                                            <div class="dms-ob-select-actions">
+                                                <span class="dms-ob-select-count" data-ob-sel-count hidden aria-live="polite"></span>
+                                                <button type="button" class="btn btn-light btn-sm" data-ob-select-all hidden><i class="fa fa-check-square-o" aria-hidden="true"></i>&nbsp;Select all</button>
+                                                <button type="button" class="btn btn-primary btn-sm" data-ob-sel-actions hidden disabled><i class="fa fa-bars" aria-hidden="true"></i>&nbsp;Actions</button>
+                                                <button type="button" class="btn btn-light btn-sm" data-ob-select-toggle aria-pressed="false"><i class="fa fa-check-square-o" aria-hidden="true"></i>&nbsp;<span>Select</span></button>
+                                            </div>
+                                        <?php } ?>
+                                    </div>
                                 <div class="table-responsive">
-                                    <table id="example" class="display" style="min-width: 845px; width: 100%;">
-                                        <colgroup>
-                                            <col style="width: 25%;">
-                                            <col style="width: 20%;">
-                                            <col style="width: 40%;">
-                                            <col style="width: 25%;">
-                                        </colgroup>
-                                        <thead class="text-center" style="background-color: #098209; color: #FFFFFF;">
+                                    <table id="example" class="display dms-stack" style="width: 100%;"
+                                           data-ob-table data-ob-can-edit="<?php echo $canEdit ? '1' : '0'; ?>"
+                                           data-ob-statuses="<?php echo htmlspecialchars(json_encode(dms_ob_statuses_for_js()), ENT_QUOTES); ?>"
+                                           data-ob-sections="<?php echo htmlspecialchars(json_encode(dms_ob_sections()), ENT_QUOTES); ?>">
+                                        <thead class="text-center">
                                             <tr>
-                                                <th style="color: #FFFFFF;">NUMBER OF REGULAR SESSION</th>
-                                                <th style="color: #FFFFFF;">DATE</th>
-                                                <th style="color: #FFFFFF;">TITLE</th>
-                                                <th style="color: #FFFFFF;">STATUS</th>
-                                                <th style="color: #FFFFFF;">ACTION</th>
+                                                <?php if ($canEdit) { ?>
+                                                    <th class="dms-ob-check-col"><input type="checkbox" class="dms-ob-check" data-ob-check-all aria-label="Select all items shown"></th>
+                                                <?php } ?>
+                                                <th>NUMBER OF REGULAR SESSION</th>
+                                                <th>DATE</th>
+                                                <th style="width: 40%;">TITLE</th>
+                                                <th>STATUS</th>
+                                                <th>ACTION</th>
                                             </tr>
                                         </thead>
-                                        <tbody class="text-left" style="color: #000000;" >
+                                        <tbody class="text-left" >
                                             <?php
-                                                include "connect.php";
-                                                $sql = "SELECT id, no_regSession, date, resNo, title, status, returnNo, resolutionNo, returnDate, resolutionDate FROM minutes ORDER BY date DESC, CAST(SUBSTRING_INDEX(resNo, '.', 1) AS UNSIGNED) DESC, CAST(SUBSTRING_INDEX(resNo, '.', -1) AS UNSIGNED) DESC";
-                                                $stmt = $conn->prepare($sql);
-                                                $stmt->execute();
-                                                $result = $stmt->get_result();
-
-                                                if (!$result) {
-                                                    die("SQL Error: " . $conn->error);
-                                                }
-
-                                                while ($row = mysqli_fetch_assoc($result)) {
+                                                $details = [];
+                                                foreach ($rows as $row) {
+                                                    $rowSched = isset($schedules[(int) $row['id']]) ? $schedules[(int) $row['id']] : [];
+                                                    $details[(int) $row['id']] = dms_ob_item_details($row, $rowSched);
                                                     ?>
-                                                    <tr>
-                                                        <td style="pointer-events: none; border-bottom: 1px solid #098209; border-left: 1px solid #098209;"><?php echo $row["no_regSession"] ?></td>
-                                                        <td style="pointer-events: none; border-bottom: 1px solid #098209;"><?php echo $row["date"]?></td>
-                                                        <td style="pointer-events: none; border-bottom: 1px solid #098209; white-space: pre-line;"><?php echo nl2br(htmlspecialchars($row["title"])); ?></td>
-                                                        
-                                                        <td style="pointer-events: none; border-bottom: 1px solid #098209; padding-top: 10px;">
-                                                            <?php echo $row["status"]; ?>
+                                                    <tr class="dms-ob-row" tabindex="0" data-id="<?php echo (int) $row['id']; ?>" data-date="<?php echo htmlspecialchars($row["date"]); ?>" data-filter="<?php echo htmlspecialchars(dms_report_row_key('minutes', $row)); ?>" data-reading="<?php echo htmlspecialchars(dms_ob_section($row)); ?>" data-status="<?php echo htmlspecialchars(dms_ob_status($row)); ?>">
+                                                        <?php if ($canEdit) { ?>
+                                                            <td class="dms-ob-check-col"><input type="checkbox" class="dms-ob-check" data-ob-check tabindex="-1" aria-label="Select <?php echo htmlspecialchars(trim($row['resNo']) !== '' ? 'item ' . $row['resNo'] : 'this item'); ?>"></td>
+                                                        <?php } ?>
+                                                        <td><?php echo htmlspecialchars($row["no_regSession"]); ?></td>
+                                                        <td><?php echo htmlspecialchars($row["date"]); ?></td>
+                                                        <td style="white-space: pre-line;"><?php echo nl2br(htmlspecialchars($row["title"])); ?></td>
 
-                                                            <?php if (!empty($row["returnNo"])): ?>
-                                                                <hr style="border: 1px solid #ccc; margin: 5px 0;">
-                                                                <div>Return No: <?php echo htmlspecialchars($row["returnNo"]); ?></div>
-                                                            <?php endif; ?>
-
-                                                            <?php if (!empty($row["resolutionNo"])): ?>
-                                                                <hr style="border: 1px solid #ccc; margin: 5px 0;">
-                                                                <div>Resolution No: <?php echo htmlspecialchars($row["resolutionNo"]); ?></div>
-                                                            <?php endif; ?>
-
-                                                            <?php if (!empty($row["returnDate"]) && $row["returnDate"] !== "0000-00-00"): ?>
-                                                                <hr style="border: 1px solid #ccc; margin: 5px 0;">
-                                                                <div>Return Date: <?php echo htmlspecialchars($row["returnDate"]); ?></div>
-                                                            <?php endif; ?>
-
-                                                            <?php if (!empty($row["resolutionDate"]) && $row["resolutionDate"] !== "0000-00-00"): ?>
-                                                                <hr style="border: 1px solid #ccc; margin: 5px 0;">
-                                                                <div>Resolution Date: <?php echo htmlspecialchars($row["resolutionDate"]); ?></div>
-                                                            <?php endif; ?>
+                                                        <td style="padding-top: 10px;" data-ob-cell>
+                                                            <?php dms_ob_render_compact($row, $rowSched); ?>
                                                         </td>
 
 
 
 
-                                                        <td style="border-bottom: 1px solid #098209; border-right: 1px solid #098209; text-align: center; vertical-align: middle;">
-                                                            <div class="d-flex justify-content-center align-items-center gap-2">
+                                                        <td style="text-align: center; vertical-align: middle;">
+                                                            <div class="dms-row-actions">
                                                                 <a href="viewmeetingminutes.php?id=<?php echo $row["id"] ?>" class="btn btn-primary btn-sm d-flex align-items-center justify-content-center p-2">
-                                                                    <i class="fa fa-eye" aria-hidden="true" style="color: #FFFFFF;"></i>
+                                                                    <i class="fa fa-eye" aria-hidden="true"></i>
                                                                 </a>
                                                                 <?php if ($role === 'admin' || $role === 'master') { ?>
                                                                     <a onclick="confirmEdit(<?php echo $row['id']; ?>)" class="btn btn-success btn-sm d-flex align-items-center justify-content-center p-2 ml-1 mr-1">
-                                                                        <i class="fa fa-edit" aria-hidden="true" style="color: #FFFFFF;"></i>
+                                                                        <i class="fa fa-edit" aria-hidden="true"></i>
                                                                     </a>
                                                                     <a onclick="confirmDelete(<?php echo $row['id']; ?>)" class="btn btn-danger btn-sm d-flex align-items-center justify-content-center p-2">
-                                                                        <i class="fa fa-trash" aria-hidden="true" style="color: #FFFFFF"></i>
+                                                                        <i class="fa fa-trash" aria-hidden="true"></i>
                                                                     </a>
                                                                 <?php } ?>
                                                             </div>
@@ -135,6 +156,52 @@
                                             ?>
                                         </tbody>
                                     </table>
+                                </div>
+                                <?php
+                                    $items = [];
+                                    foreach ($rows as $row) {
+                                        $state    = dms_ob_section($row);
+                                        $number = trim($row['no_regSession']);
+                                        if (trim($row['resNo']) !== '') {
+                                            $number .= ($number !== '' ? ' · ' : '') . 'Item ' . trim($row['resNo']);
+                                        }
+                                        $items[] = [
+                                            'id'         => $row['id'],
+                                            'date'       => $row['date'],
+                                            'date_label' => 'Session',
+                                            'url'        => 'viewmeetingminutes.php?id=' . (int) $row['id'],
+                                            'number'     => $number,
+                                            'title'      => $row['title'],
+                                            'type'       => 'Order of Business',
+                                            'meta'       => [
+                                                'Status'        => dms_ob_status($row),
+                                                'Resolution No' => $row['resolutionNo'],
+                                            ],
+                                            'pill'       => [$state, dms_ob_section_pill($state)],
+                                        ];
+                                    }
+                                    dms_history_render($items);
+                                ?>
+                                <!-- Per-item details for the left-click view (js/ob-status-menu.js) -->
+                                <script type="application/json" id="ob-items"><?php echo json_encode((object) $details, JSON_INVALID_UTF8_SUBSTITUTE) /* "/" is escaped, so "</script>" cannot occur */; ?></script>
+
+                                <!-- Agenda item details (left-click) -->
+                                <div class="modal fade" id="obDetailsModal" tabindex="-1" role="dialog" aria-labelledby="obDetailsTitle" aria-hidden="true">
+                                    <div class="modal-dialog modal-lg modal-dialog-centered" role="document">
+                                        <div class="modal-content">
+                                            <div class="modal-header">
+                                                <h5 class="modal-title" id="obDetailsTitle">Agenda item details</h5>
+                                                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                                                    <span aria-hidden="true">&times;</span>
+                                                </button>
+                                            </div>
+                                            <div class="modal-body dms-ob-details" data-ob-details></div>
+                                            <div class="modal-footer">
+                                                <a href="#" class="btn btn-primary" data-ob-details-open>Open full page</a>
+                                                <button type="button" class="btn btn-light" data-dismiss="modal">Close</button>
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -236,7 +303,7 @@
                                 showConfirmButton: false,
                                 timer: 2000
                             });
-                            window.location.href = 'deletemeetingminutes.php?id=' + id;
+                            DmsNav.go('deletemeetingminutes.php?id=' + id, { replace: true }); // replace: the list comes back in place of the delete
                         }
                     });
                 }
@@ -275,7 +342,7 @@
                 allowOutsideClick: () => !Swal.isLoading()
             }).then((result) => {
                 if (result.isConfirmed) {
-                    window.location.href = 'editmeetingminutes.php?id=' + id;
+                    DmsNav.go('editmeetingminutes.php?id=' + id);
                 }
             });
         }
@@ -285,14 +352,70 @@
                 $("#example").DataTable().destroy(); // Destroy existing DataTable instance
             }
 
+            // Admins/masters have a leading checkbox column (multi-select), so DATE shifts by one.
+            var hasCheck = $("#example [data-ob-check-all]").length > 0;
             $("#example").DataTable({
-                "order": [[1, "desc"]], // Sort by the 4th column (index 3, zero-based) in descending order
+                "order": [[hasCheck ? 2 : 1, "desc"]], // Sort by DATE, newest first
+                "columnDefs": hasCheck ? [{ "targets": 0, "orderable": false, "searchable": false }] : [],
                 "destroy": true // Ensure previous instance is removed
             });
         });
 
+        // Section tabs: All / First / Second / Third Reading / Other Matters.
+        // Rows carry data-reading (dms_ob_section). ext.search is global, so the
+        // filter survives the DataTable being re-initialised; the timeline view
+        // follows the table's filtered rows (js/history-timeline.js).
+        (function ($) {
+            var storeKey = 'dms-ob-tab:' + window.location.pathname;
+            var active = '';
+            try { active = window.localStorage.getItem(storeKey) || ''; } catch (e) { active = ''; }
+
+            var $tabs = $('[data-ob-tabs] [data-ob-tab]');
+            if (!$tabs.filter(function () { return $(this).attr('data-ob-tab') === active; }).length) {
+                active = '';
+            }
+
+            $.fn.dataTable.ext.search.push(function (settings, data, dataIndex) {
+                if (!active || settings.nTable.id !== 'example') { return true; }
+                var tr = settings.aoData[dataIndex] && settings.aoData[dataIndex].nTr;
+                return !tr || tr.getAttribute('data-reading') === active;
+            });
+
+            function paint() {
+                $tabs.each(function () {
+                    var on = $(this).attr('data-ob-tab') === active;
+                    $(this).toggleClass('is-active', on).attr('aria-pressed', on ? 'true' : 'false');
+                });
+            }
+
+            $tabs.on('click', function () {
+                active = $(this).attr('data-ob-tab');
+                try { window.localStorage.setItem(storeKey, active); } catch (e) { /* storage blocked */ }
+                paint();
+                if ($.fn.DataTable.isDataTable('#example')) {
+                    $('#example').DataTable().draw();
+                }
+            });
+
+            paint();
+            $(function () {
+                if (active && $.fn.DataTable.isDataTable('#example')) {
+                    $('#example').DataTable().draw();
+                }
+            });
+        })(jQuery);
+
     </script>
 
+
+    <!-- Report toolbar: filters + Print / PDF / Excel -->
+    <script src="./js/report-toolbar.js?v=<?php echo filemtime(__DIR__ . '/js/report-toolbar.js'); ?>"></script>
+    <!-- History "Show in list": ?locate=id pages to the row and flashes it -->
+    <script src="./js/locate-row.js?v=<?php echo filemtime(__DIR__ . '/js/locate-row.js'); ?>"></script>
+    <!-- History timeline: Table | Timeline switch; cards follow the table's search and filters -->
+    <script src="./js/history-timeline.js?v=<?php echo filemtime(__DIR__ . '/js/history-timeline.js'); ?>"></script>
+    <!-- Agenda items: left-click details, right-click SET STATUS menu -->
+    <script src="./js/ob-status-menu.js?v=<?php echo filemtime(__DIR__ . '/js/ob-status-menu.js'); ?>"></script>
 </body>
 
 </html>

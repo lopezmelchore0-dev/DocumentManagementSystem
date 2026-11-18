@@ -19,18 +19,24 @@ $published = $publishedTerms->fetch_all(MYSQLI_ASSOC);
             $role = $_SESSION['role'] ?? 'master';
         ?>
 
-        <div class="content-body" style="background-color: #f1f9f1">
+        <div class="content-body">
             <div class="container-fluid">
-                <h3 class="text-center mb-4" style="color: #098209;">
-                    <i class="icon icon-doc me-2"></i> Published Organization Charts
-                </h3>
+                <div class="dms-page-head">
+                    <div>
+                        <h1>Published Terms</h1>
+                        <p>Organizational charts that have been published, one per term.</p>
+                    </div>
+                </div>
 
                 <?php foreach ($published as $term): ?>
                     <div class="card mb-4">
-                        <div class="card-header text-white" py-2 px-3 style="background-color: #098209;">
-                            Term: <?= date("F j, Y", strtotime($term['term_start'])) ?> – <?= date("F j, Y", strtotime($term['term_end'])) ?>
+                        <div class="card-header d-flex justify-content-between align-items-center flex-wrap" style="gap: .75rem;">
+                            <div>
+                                <h4 class="dms-card-title">Term: <?= date("F j, Y", strtotime($term['term_start'])) ?> – <?= date("F j, Y", strtotime($term['term_end'])) ?></h4>
+                                <p class="dms-card-sub mb-0">Published organizational chart</p>
+                            </div>
 
-                            <form method="POST" action="deletePublishedTerm.php" class="mt-2 text-end me-2 delete-term-form">
+                            <form method="POST" action="deletePublishedTerm.php" class="mb-0 delete-term-form">
                                 <input type="hidden" name="term_start" value="<?= htmlspecialchars($term['term_start']) ?>">
                                 <input type="hidden" name="term_end" value="<?= htmlspecialchars($term['term_end']) ?>">
                                 <button type="button" class="btn btn-danger btn-sm delete-term-btn">Delete Term</button>
@@ -53,15 +59,15 @@ $published = $publishedTerms->fetch_all(MYSQLI_ASSOC);
 
                                 while ($official = $result->fetch_assoc()):
                                 ?>
-                                    <div class="col-md-3 mb-3">
-                                        <div class="card h-100 text-center">
-                                            <img src="<?= htmlspecialchars($official['photo_path']) ?>" 
-                                                 class="card-img-top" 
-                                                 alt="<?= htmlspecialchars($official['name']) ?>" 
+                                    <div class="col-xl-3 col-lg-4 col-sm-6 mb-3">
+                                        <div class="card h-100 text-center dms-official-card" style="cursor: default;">
+                                            <img src="<?= htmlspecialchars($official['photo_path']) ?>"
+                                                 class="card-img-top"
+                                                 alt="<?= htmlspecialchars($official['name']) ?>"
                                                  style="object-fit: cover; height: 200px;">
                                             <div class="card-body">
                                                 <h5 class="card-title"><?= htmlspecialchars($official['name']) ?></h5>
-                                                <p class="card-text"><?= htmlspecialchars($official['position']) ?></p>
+                                                <p class="card-text dms-pill is-green is-plain"><?= htmlspecialchars($official['position']) ?></p>
                                             </div>
                                         </div>
                                     </div>

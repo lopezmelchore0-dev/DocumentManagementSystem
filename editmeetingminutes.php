@@ -2,102 +2,119 @@
 
     if(isset($_POST['save'])) {
         include("connect.php");
+        require_once __DIR__ . "/includes/minutes_workflow.php";
         error_reporting(0);
+        dms_ob_ensure_schema($conn);
 
         $id = intval($_POST['id']);
-        $no_regSession = mysqli_real_escape_string($conn, $_POST['no_regSession']);
-        $date = mysqli_real_escape_string($conn, $_POST['date']);
-        $resNo = mysqli_real_escape_string($conn, $_POST['resNo']);
-        $title = mysqli_real_escape_string($conn, $_POST['title']);
-        $status = mysqli_real_escape_string($conn, $_POST['status']);
+        $no_regSession = $_POST['no_regSession'];
+        $date = $_POST['date'];
+        $resNo = $_POST['resNo'];
+        $title = $_POST['title'];
 
-        $optRadio = $_POST['optradio'];
+        // Section, status and resolution details
+        $itemIn = dms_ob_item_input(isset($_POST['ob']) ? $_POST['ob'] : []);
 
-        // Initialize fields
-        $returnNo = mysqli_real_escape_string($conn, $_POST['returnNo']);
-        $returnDate = mysqli_real_escape_string($conn, $_POST['returnDate']);
-        $resolutionNo = mysqli_real_escape_string($conn, $_POST['resolutionNo']);
-        $resolutionDate = mysqli_real_escape_string($conn, $_POST['resolutionDate']);
-
-        // Use switch case to handle conditions
-        switch ($optRadio) {
-            case 'Approved':
-                $returnNo = "";
-                $returnDate = "";
-                break;
-            case 'Returned':
-                $resolutionNo = "";
-                $resolutionDate = "";
-                break;
-            default:
-                $returnNo = "";
-                $returnDate = "";
-                $resolutionNo = "";
-                $resolutionDate = "";
-                break;
+        // Current record: kept attachments and the previous section / status.
+        $current = ['genAttachment' => '', 'attachment' => '', 'reading' => 'First Reading', 'ob_status' => ''];
+        $cur_stmt = $conn->prepare("SELECT genAttachment, attachment, reading, ob_status FROM minutes WHERE id = ?");
+        if ($cur_stmt) {
+            $cur_stmt->bind_param("i", $id);
+            $cur_stmt->execute();
+            $found = $cur_stmt->get_result()->fetch_assoc();
+            if ($found) {
+                $current = $found;
+            }
+            $cur_stmt->close();
         }
 
-        // Handle file uploads
-        $genAttachment = $_FILES['genAttachment']['name'];
-        $attachment = $_FILES['attachment']['name'];
+        // Handle file uploads. A file that cannot be saved keeps the old attachment.
+        require_once __DIR__ . "/includes/upload_helper.php";
+        require_once __DIR__ . "/includes/scanner.php";
+        $uploadErrors = [];
 
-        $uploadDir = "uploads/";  // Define upload directory
-
-        if (!empty($genAttachment)) {
-            $genAttachmentPath = $uploadDir . basename($genAttachment);
-            move_uploaded_file($_FILES["genAttachment"]["tmp_name"], $genAttachmentPath);
-        } else {
-            // Keep the old file if no new file is uploaded
-            $genAttachmentQuery = "SELECT genAttachment FROM minutes WHERE id = $id";
-            $result = mysqli_query($conn, $genAttachmentQuery);
-            $row = mysqli_fetch_assoc($result);
-            $genAttachmentPath = $row['genAttachment'];
+        $genAttachmentPath = null;
+        if (!empty($_FILES['genAttachment']['name'])) {
+            $err = null;
+            $genAttachmentPath = dms_store_upload($_FILES['genAttachment'], $err);
+            if ($genAttachmentPath === null) {
+                $uploadErrors[] = 'Order of Business attachment: ' . $err;
+            }
+        }
+        if ($genAttachmentPath === null) {
+            $genAttachmentPath = (string) $current['genAttachment'];
         }
 
-        if (!empty($attachment)) {
-            $attachmentPath = $uploadDir . basename($attachment);
-            move_uploaded_file($_FILES["attachment"]["tmp_name"], $attachmentPath);
-        } else {
-            // Keep the old file if no new file is uploaded
-            $attachmentQuery = "SELECT attachment FROM minutes WHERE id = $id";
-            $result = mysqli_query($conn, $attachmentQuery);
-            $row = mysqli_fetch_assoc($result);
-            $attachmentPath = $row['attachment'];
+        $attachmentPath = null;
+        if (!empty($_FILES['attachment']['name'])) {
+            $err = null;
+            $attachmentPath = dms_store_upload($_FILES['attachment'], $err);
+            if ($attachmentPath === null) {
+                $uploadErrors[] = 'Supporting document: ' . $err;
+            }
+        }
+        if ($attachmentPath === null) {
+            $attachmentPath = (string) $current['attachment'];
         }
 
-        // Update query
-        $sql = "UPDATE `minutes` SET 
-                `no_regSession` = '$no_regSession',
-                `date` = '$date',
-                `genAttachment` = '$genAttachmentPath',
-                `resNo` = '$resNo',
-                `title` = '$title',
-                `status` = '$status',
-                `returnNo` = '$returnNo',
-                `returnDate` = '$returnDate',
-                `resolutionNo` = '$resolutionNo',
-                `resolutionDate` = '$resolutionDate',
-                `attachment` = '$attachmentPath' WHERE `id` = $id";
-
-        $query = mysqli_query($conn, $sql);
-
-        $log_sql = "INSERT INTO history_log (action, file_type, status, file_id, title) 
-        VALUES ('Edited', 'Minutes', '$status', $id, '$title')";
-        $conn->query($log_sql);
+        // Update the record in place. The old status / return columns are left
+        // untouched so earlier details are preserved.
+        $query = false;
+        $stmt = $conn->prepare("UPDATE `minutes` SET `no_regSession` = ?, `date` = ?, `genAttachment` = ?,
+                                       `resNo` = ?, `title` = ?, `attachment` = ? WHERE `id` = ?");
+        if ($stmt) {
+            $stmt->bind_param("ssssssi", $no_regSession, $date, $genAttachmentPath, $resNo, $title, $attachmentPath, $id);
+            $query = $stmt->execute();
+            $stmt->close();
+        }
 
         if ($query) {
+            $result = dms_ob_save_item($conn, $id, $itemIn, $current, true);
+
+            // A separate entry when the section or status changed, so the history shows the full trail.
+            $changeLabel = dms_ob_change_label($result);
+            if ($changeLabel !== '') {
+                dms_ob_log_history($conn, $id, $title, $changeLabel, $result['section'], $result['status']);
+            }
+            dms_ob_log_history($conn, $id, $title, 'Edited', $result['section'], $result['status']);
+        }
+
+        if ($query) {
+            // Extra PDFs from the scanner (Separate PDFs) → additional attachments
+            $uploadErrors = array_merge($uploadErrors, dms_ra_store_posted_extras($conn, 'ob', $id, 'scan_extra'));
+            echo dms_scan_clear_script('ob:' . $id);
+        }
+
+        if ($query && $uploadErrors) {
+            echo "<script>
+            document.addEventListener('DOMContentLoaded', function() {
+                Swal.fire({
+                    icon: 'warning',
+                    title: 'Updated, but a file was not uploaded',
+                    text: " . json_encode(implode("\n", $uploadErrors) . "\nThe previous attachment was kept.") . ",
+                    showCancelButton: true,
+                    confirmButtonText: 'Continue Editing',
+                    cancelButtonText: 'Return to Order of Business'
+                }).then((result) => {
+                    if (!result.isConfirmed) {
+                        DmsNav.returnTo('files-meetingminutes.php');
+                    }
+                });
+            });
+        </script>";
+        } elseif ($query) {
             echo "<script>
             document.addEventListener('DOMContentLoaded', function() {
                 Swal.fire({
                     icon: 'success',
-                    title: 'Meeting Minutes Updated',
-                    text: 'The minutes have been successfully updated.',
+                    title: 'Order of Business Updated',
+                    text: 'The item has been updated and is now in " . htmlspecialchars($result['section'], ENT_QUOTES) . ".',
                     showCancelButton: true,
                     confirmButtonText: 'Continue Editing',
-                    cancelButtonText: 'Return to Minutes Table'
+                    cancelButtonText: 'Return to Order of Business'
                 }).then((result) => {
                     if (!result.isConfirmed) {
-                        window.location.href = 'files-meetingminutes.php';
+                        DmsNav.returnTo('files-meetingminutes.php');
                     }
                 });
             });
@@ -108,13 +125,11 @@
                         Swal.fire({
                             icon: 'error',
                             title: 'Error',
-                            text: 'There was an error updating the minutes.',
+                            text: 'There was an error updating the Order of Business.',
                             confirmButtonText: 'OK'
                         });
                     });
                   </script>";
-            header("Location: files-meetingminutes.php");
-            exit;
         }
     }
 ?>
@@ -125,6 +140,7 @@
 <?php 
     include "header.php"; 
     include "connect.php";
+    require_once __DIR__ . "/includes/scanner.php";
 
 ?>
 
@@ -140,35 +156,35 @@
         <!--**********************************
             Content body start
         ***********************************-->
-        <div class="content-body" style="background-color: #f1f9f1">
+        <div class="content-body">
             <div class="container-fluid" >
                 <!-- row -->
                 <div class="row d-flex justify-content-center">
-                    <div class="col-xl-8 col-xxl-12 items-center">                        
+                    <div class="col-xl-8 col-xxl-12 items-center dms-form-wrap">                        
                         <div class="card" style="align-self: center;">
-                            <div class="card-header d-flex justify-content-center">
-                                <h4 class="card-title text-center" style="color: #098209; ">EDIT ORDER OF BUSINESS</h4>
+                            <div class="card-header">
+                                <div><h4 class="card-title mb-0">Edit Order of Business</h4><p class="dms-card-sub">Update the details below, then save your changes.</p></div>
                             </div>
                             <?php
                                 include("connect.php");
+                                require_once __DIR__ . "/includes/minutes_workflow.php";
+                                dms_ob_ensure_schema($conn);
                                 $id = intval($_GET['id']); // Ensure ID is an integer
                                 $sql = "SELECT * FROM `minutes` WHERE id = $id LIMIT 1";
                                 $result = mysqli_query($conn, $sql);
-                                
+
                                 if ($result && mysqli_num_rows($result) > 0) {
                                     $row = mysqli_fetch_assoc($result);
                                 } else {
-                                    echo "<script>alert('Invalid Record ID!'); window.location.href='files-meetingminutes.php';</script>";
+                                    echo "<script>alert('Invalid Record ID!'); window.location.replace('files-meetingminutes.php');</script>";
                                     exit;
                                 }
 
-                                // Determine the value for optRadio based on conditions
-                                $optRadio = "";
-                                if ($row['resolutionNo'] != "" && $row['resolutionDate'] != "") {
-                                    $optRadio = "Approved";
-                                } elseif ($row['returnNo'] != "" &&  $row['returnDate'] != "") {
-                                    $optRadio = "Returned";
-                                } 
+                                // Earlier details (old action, schedules, referral), shown read-only
+                                $schedules = dms_ob_load_schedules($conn, [$id]);
+                                $schedules = isset($schedules[$id]) ? $schedules[$id] : [];
+                                $obSection = dms_ob_section($row);
+                                $obStatus  = dms_ob_status($row);
                             ?>
                             <div class="card-body">
                                 <div class="basic-form">
@@ -179,21 +195,21 @@
                                             </div>
                                         </div>
                                         <div class="form-group row">
-                                            <label class="col-sm-3 col-form-label" style="color: #000000">No. of Regular Session</label>
+                                            <label class="col-sm-3 col-form-label">No. of Regular Session</label>
                                             <div class="col-sm-9">
                                                 <input type="text" class="form-control" placeholder="Please type here..." value="<?php echo $row['no_regSession']?>" id="no_regSession" name="no_regSession">
                                             </div>
                                         </div>
                                         <div class="form-group row">
-                                            <label class="col-sm-3 col-form-label" style="color:#000000">Date:</label>
+                                            <label class="col-sm-3 col-form-label">Date:</label>
                                             <div class="col-sm-9">
                                                 <input type="date" class="form-control" placeholder="Please type here..." value="<?php echo $row['date']?>" id="date" name="date">
                                             </div>
                                         </div>
-                                        <label style="color: #000000">Upload Attachment for Order of Business:</label>
+                                        <label>Upload Attachment for Order of Business:</label>
                                         <div class="input-group mb-3">
                                             <div class="input-group-prepend">
-                                                <span class="input-group-text" style="background-color: #098209;"> <i class="fa fa-paperclip"></i></span>
+                                                <span class="input-group-text"> <i class="fa fa-paperclip"></i></span>
                                             </div>
                                             <div class="custom-file">
                                                 <input type="file" class="custom-file-input" value="genAttachment" id="genAttachment" name="genAttachment" onchange="updateFileName('genAttachmentLabel')">
@@ -202,48 +218,59 @@
                                                 </label>
                                             </div>
                                             <div class="input-group-append">
+                                                <?php echo dms_scan_button(['mode' => 'form', 'module' => 'ob', 'record_id' => $row['id'], 'field' => 'genAttachment', 'input' => 'genAttachment', 'extra_field' => '', 'label' => 'Order of Business ' . $row['no_regSession']]); ?>
                                                 <button class="btn btn-danger" type="button" onclick="removeFile()"><i class="fa fa-close"></i></button>
                                             </div>
                                         </div>
                                         <div class="form-group row">
-                                            <label class="col-sm-3 col-form-label" style="color: #000000">Item No.:</label>
+                                            <label class="col-sm-3 col-form-label">Item No.:</label>
                                             <div class="col-sm-9">
                                                 <input type="text" class="form-control" value="<?php echo $row['resNo']?>" name="resNo" required>
                                             </div>
                                         </div>
                                         <div class="form-group row">
-                                            <label class="col-sm-3 col-form-label" style="color: #000000">Title:</label>
+                                            <label class="col-sm-3 col-form-label">Title:</label>
                                             <div class="col-sm-9">
                                                 <textarea class="form-control" id="title" name="title" rows="1" style="resize: none; overflow: hidden;"><?php echo htmlspecialchars_decode($row['title']); ?></textarea>
                                             </div>
                                         </div>
                                         <div class="form-group row">
-                                            <label for="status" class="col-sm-3 col-form-label" style="color: #000000">Status:</label>
+                                            <label class="col-sm-3 col-form-label" for="ob_section">Section:</label>
                                             <div class="col-sm-9">
-                                                <input type="text" class="form-control" value="<?php echo $row['status']?>" id="status" name="status" required>
+                                                <?php dms_ob_render_section_field('ob[section]', 'ob_section', $obSection); ?>
                                             </div>
                                         </div>
                                         <div class="form-group row">
-                                            <label for="status" class="col-sm-3 col-form-label" style="color: #000000">Select option if applicable:</label>
-                                            <div class="col-sm-9 mt-2">
-                                                <label class="radio-inline mr-5" style="color: #000000">
-                                                    <input type="radio" name="optradio" class="deselectable-radio" value="Returned" <?php echo ($optRadio === "Returned") ? 'checked' : ''; ?>> Returned
-                                                </label>
-                                                <label class="radio-inline" style="color: #000000">
-                                                    <input type="radio" name="optradio" class="deselectable-radio" value="Approved" <?php echo ($optRadio === "Approved") ? 'checked' : ''; ?>> Approved
-                                                </label>
+                                            <label class="col-sm-3 col-form-label" for="ob_status">Status:</label>
+                                            <div class="col-sm-9">
+                                                <?php dms_ob_render_status_field('ob[status]', 'ob_status', $obSection, $obStatus); ?>
+                                                <small class="dms-ob-muted">Options depend on the section. Changing the section clears a status it does not offer. Approved moves the item to Third Reading.</small>
                                             </div>
                                         </div>
-                                        <!-- Hidden fields section -->
-                                        <div class="form-group row extra-fields mt-3" style="display: none;">
-                                            <div class="col-sm-12" id="extraFields">
-                                                <!-- Dynamic fields go here -->
+                                        <div class="form-group row">
+                                            <label class="col-sm-3 col-form-label" for="ob_res_no">Resolution / Ordinance No.:</label>
+                                            <div class="col-sm-9">
+                                                <input type="text" class="form-control" id="ob_res_no" name="ob[resolutionNo]" value="<?php echo htmlspecialchars((string) $row['resolutionNo']); ?>" placeholder="e.g. Resolution No. 012-2026">
                                             </div>
                                         </div>
-                                        <label style="color: #000000">Upload Attachment as Supporting Documents:</label>
+                                        <div class="form-group row">
+                                            <label class="col-sm-3 col-form-label" for="ob_res_date">Date approved:</label>
+                                            <div class="col-sm-9">
+                                                <input type="date" class="form-control" id="ob_res_date" name="ob[resolutionDate]" value="<?php echo htmlspecialchars(dms_ob_clean_date((string) $row['resolutionDate'])); ?>">
+                                            </div>
+                                        </div>
+                                        <?php if (dms_ob_has_earlier($row, $schedules)) { ?>
+                                            <div class="form-group row">
+                                                <label class="col-sm-3 col-form-label">Earlier details:</label>
+                                                <div class="col-sm-9">
+                                                    <div class="dms-ob-summary"><?php dms_ob_render_earlier($row, $schedules); ?></div>
+                                                </div>
+                                            </div>
+                                        <?php } ?>
+                                        <label>Upload Attachment as Supporting Documents:</label>
                                         <div class="input-group mb-3">
                                             <div class="input-group-prepend">
-                                                <span class="input-group-text" style="background-color: #098209;"> <i class="fa fa-paperclip"></i></span>
+                                                <span class="input-group-text"> <i class="fa fa-paperclip"></i></span>
                                             </div>
                                             <div class="custom-file">
                                                 <input type="file" class="custom-file-input" id="attachment" value="attachment" name="attachment" onchange="updateFileName('attachmentLabel')">
@@ -252,12 +279,14 @@
                                                 </label>
                                             </div>
                                             <div class="input-group-append">
+                                                <?php echo dms_scan_button(['mode' => 'form', 'module' => 'ob', 'record_id' => $row['id'], 'field' => 'attachment', 'input' => 'attachment', 'extra_field' => 'scan_extra[]', 'label' => 'OB Item ' . $row['resNo']]); ?>
                                                 <button class="btn btn-danger" type="button" onclick="removeFile2()"><i class="fa fa-close"></i></button>
                                             </div>
                                         </div>
-                                        <div class="form-group row d-flex justify-content-center mt-5">
-                                            <button type="submit" class="btn btn-primary" id="save_btn" name="save" value="Save Data" style="background-color: #098209; border: none; width: 100px; color: #FFFFFF;">Update</button>
-                                            <a href="files-meetingminutes.php" class="btn btn-danger ml-2" id="cancel_btn" name="cancel" value="Cancel" style="background-color: red; border: none; width: 100px; color: #FFFFFF;">Cancel</a>
+                                        <?php dms_ra_render_list($conn, 'ob', $row['id'], true); ?>
+                                        <div class="form-group row d-flex justify-content-center mt-5 dms-form-actions">
+                                            <button type="submit" class="btn btn-primary" id="save_btn" name="save" value="Save Data">Update</button>
+                                            <a href="files-meetingminutes.php" class="btn btn-light" id="cancel_btn" name="cancel" value="Cancel" data-dms-return>Cancel</a>
                                         </div>
                                     </form>
                                 </div>
@@ -329,82 +358,30 @@
         });
     </script>
 
+    <!-- Status options follow the chosen section (dms_ob_render_status_field) -->
     <script>
-        document.addEventListener('DOMContentLoaded', function () {
-            const radios = document.querySelectorAll("input[name='optradio']");
-            const extraFieldsContainer = document.querySelector("#extraFields");
-            const extraFieldsRow = document.querySelector(".extra-fields");
-            const statusInputField = document.querySelectorAll("input[name='status']");
-            const statusInput = document.querySelector("#status");
+        (function () {
+            var sectionSel = document.querySelector('[data-ob-section]');
+            var statusSel = document.querySelector('[data-ob-status]');
+            if (!sectionSel || !statusSel) { return; }
+            var options = {};
+            try { options = JSON.parse(statusSel.getAttribute('data-ob-status-options') || '{}') || {}; } catch (e) { options = {}; }
 
-            function showExtraFields(selectedValue) {
-                extraFieldsRow.style.display = "block";
-
-                if (selectedValue === "Returned") {
-                    extraFieldsContainer.innerHTML = `
-                        <div class="form-group row">
-                            <label class="col-sm-3 col-form-label" style="color:#000000">Return No.:</label>
-                            <div class="col-sm-9">
-                                <input type="text" class="form-control" value="<?php echo isset($row['returnNo']) ? $row['returnNo'] : ''; ?>" name="returnNo">
-                            </div>
-                        </div>
-                        <div class="form-group row">
-                            <label class="col-sm-3 col-form-label" style="color:#000000">Return Date:</label>
-                            <div class="col-sm-9">
-                                <input type="date" class="form-control" value="<?php echo isset($row['returnDate']) ? $row['returnDate'] : ''; ?>" name="returnDate">
-                            </div>
-                        </div>
-                    `;
-                } else if (selectedValue === "Approved") {
-                    extraFieldsContainer.innerHTML = `
-                        <div class="form-group row">
-                            <label class="col-sm-3 col-form-label" style="color:#000000">Resolution No.:</label>
-                            <div class="col-sm-9">
-                                <input type="text" class="form-control" value="<?php echo isset($row['resolutionNo']) ? $row['resolutionNo'] : ''; ?>" name="resolutionNo">
-                            </div>
-                        </div>
-                        <div class="form-group row">
-                            <label class="col-sm-3 col-form-label" style="color:#000000">Resolution Date Approved:</label>
-                            <div class="col-sm-9">
-                                <input type="date" class="form-control" value="<?php echo isset($row['resolutionDate']) ? $row['resolutionDate'] : ''; ?>" name="resolutionDate">
-                            </div>
-                        </div>
-                    `;
-                }
-            }
-
-            // Check if a radio button is already selected on page load
-            const selectedRadio = document.querySelector("input[name='optradio']:checked");
-            if (selectedRadio) {
-                showExtraFields(selectedRadio.value);
-            } else {
-                extraFieldsRow.style.display = "none";
-            }
-
-            // Add event listeners to radio buttons
-            radios.forEach(radio => {
-                radio.addEventListener('click', function () {
-                    if (this.checked) {
-                        if (this.previousChecked) {
-                            this.checked = false;
-                            this.previousChecked = false;
-                            extraFieldsRow.style.display = "none";
-                            extraFieldsContainer.innerHTML = "";
-                            statusInput.value = "";
-                        } else {
-                            radios.forEach(r => r.previousChecked = false);
-                            this.previousChecked = true;
-                            showExtraFields(this.value);
-                            statusInput.value = this.value;
-                        }
-                    }
+            sectionSel.addEventListener('change', function () {
+                var keep = statusSel.value;
+                var list = options[sectionSel.value] || [];
+                while (statusSel.options.length > 1) { statusSel.remove(1); } // keep "— No status —"
+                list.forEach(function (label) {
+                    statusSel.add(new Option(label, label, false, label === keep));
                 });
+                if (list.indexOf(keep) === -1) { statusSel.value = ''; }
             });
-        });
+        })();
     </script>
 
     
     
+    <?php dms_scanner_assets(); // Scan Document (includes/scanner.php) ?>
 </body>
 
 </html>
